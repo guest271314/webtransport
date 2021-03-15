@@ -3,8 +3,8 @@ async function webTransportBreakoutBox(text) {
   try {
     const transport = new WebTransport(url);
     await transport.ready;
-    const initial = 1; // 6.4KiB
-    const maximum = 500; // 32 KiB
+    const initial = 1; // 6.4 KiB
+    const maximum = 500; // 32 MiB
     let readOffset = 0;
     let writeOffset = 0;
     let duration = 0;
