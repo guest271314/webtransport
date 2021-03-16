@@ -65,13 +65,19 @@ async function webTransportBreakoutBox(text) {
                 `memory.buffer.byteLength after grow(): ${memory.buffer.byteLength}`
               );
             }
-            const sab = new Uint8Array(memory.buffer);
+            let sab = new Uint8Array(memory.buffer);
             let i = 0;
             if (!init) {
               init = true;
               i = 44;
             }
             for (; i < value.buffer.byteLength; i++, readOffset++) {
+              if (readOffset + 1 >= memory.buffer.byteLength) {
+                console.log(`memory.buffer.byteLength before grow() for loop: ${memory.buffer.byteLength}.`);
+                memory.grow(3);
+                console.log(`memory.buffer.byteLength after grow() for loop: ${memory.buffer.byteLength}`);
+                sab = new Uint8Array(memory.buffer);
+              }
               sab[readOffset] = value[i];
             }
           },
