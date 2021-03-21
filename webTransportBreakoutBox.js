@@ -149,7 +149,6 @@ async function webTransportBreakoutBox(text) {
         duration += buffer.duration;
         const frame = new AudioFrame({ timestamp, buffer });
         return audioWriter.write(frame).then(() => {
-          frame.close();
           return audioReader.read().then(process);
         });
       }),
