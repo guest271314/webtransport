@@ -3,8 +3,8 @@ async function webTransportBreakoutBox(text) {
   try {
     const transport = new WebTransport(url);
     await transport.ready;
-    const initial = 1; // 6.4 KiB
-    const maximum = 500; // 32 MiB
+    const initial = 1; // 6.4KiB (65536)
+    const maximum = 500; // 32 KiB
     let readOffset = 0;
     let writeOffset = 0;
     let duration = 0;
@@ -18,7 +18,9 @@ async function webTransportBreakoutBox(text) {
     const sender = await transport.createUnidirectionalStream();
     const writer = sender.writable.getWriter();
     const encoder = new TextEncoder('utf-8');
-    const data = encoder.encode(text);
+    const data = encoder.encode(
+      `espeak-ng -m --stdout "${text}"` // command, options
+    );
     await writer.write(data);
     await writer.close();
     const reader = transport.incomingUnidirectionalStreams.getReader();
@@ -26,6 +28,7 @@ async function webTransportBreakoutBox(text) {
     const transportStream = result.value;
     const { readable } = transportStream;
     const ac = new AudioContext({
+      sampleRate: 22050,
       latencyHint: 0,
     });
     const audio = document.querySelector('audio');
@@ -73,9 +76,13 @@ async function webTransportBreakoutBox(text) {
             }
             for (; i < value.buffer.byteLength; i++, readOffset++) {
               if (readOffset + 1 >= memory.buffer.byteLength) {
-                console.log(`memory.buffer.byteLength before grow() for loop: ${memory.buffer.byteLength}.`);
+                console.log(
+                  `memory.buffer.byteLength before grow() for loop: ${memory.buffer.byteLength}.`
+                );
                 memory.grow(3);
-                console.log(`memory.buffer.byteLength after grow() for loop: ${memory.buffer.byteLength}`);
+                console.log(
+                  `memory.buffer.byteLength after grow() for loop: ${memory.buffer.byteLength}`
+                );
                 sab = new Uint8Array(memory.buffer);
               }
               sab[readOffset] = value[i];
@@ -87,15 +94,15 @@ async function webTransportBreakoutBox(text) {
         })
       ),
       audioReader.read().then(async function process({ value, done }) {
-        if (audio.currentTime < (Math.E * 2 / 10)) {
-          // avoid clipping start of MediaStreamTrackGenerator output
+        // avoid clipping start of MediaStreamTrackGenerator output
+        if (audio.currentTime < value.buffer.duration * 50) {
           return audioWriter
             .write(value)
             .then(() => audioReader.read().then(process));
         }
         if (writeOffset && writeOffset >= readOffset) {
-          if (ac.currentTime < duration + (Math.E * 2 / 10)) {
-            // avoid clipping end of MediaStreamTrackGenerator output
+          // avoid clipping end of MediaStreamTrackGenerator output
+          if (audio.currentTime < duration + value.buffer.duration * 100) {
             return audioReader.read().then(process);
           } else {
             msd.disconnect();
@@ -107,12 +114,13 @@ async function webTransportBreakoutBox(text) {
             writable.abort();
             await writable.closed;
             await ac.close();
+            console.log(
+              `readOffset: ${readOffset}, writeOffset: ${writeOffset}, duration: ${duration}, audio.currentTime: ${audio.currentTime}, ac.currentTime: ${ac.currentTime}`
+            );
             return await Promise.all([
               new Promise((resolve) => (stream.oninactive = resolve)),
               new Promise((resolve) => (ac.onstatechange = resolve)),
             ]);
-            // console.log(`readOffset: ${readOffset}, writeOffset: ${writeOffset}, duration: ${duration}`);
-            // console.log(`audio.currentTime: ${audio.currentTime}, ac.currentTime: ${ac.currentTime}`);
           }
         }
         const { timestamp } = value;
@@ -146,9 +154,9 @@ async function webTransportBreakoutBox(text) {
         });
       }),
     ]);
-    transportStream.abortReading();
+    await transportStream.abortReading();
     await transportStream.readingAborted;
-    transport.close();
+    await transport.close();
     // recorder.stop();
     return transport.closed
       .then((_) => {
