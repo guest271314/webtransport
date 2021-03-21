@@ -82,6 +82,7 @@ import struct
 import urllib.parse
 from collections import defaultdict
 from typing import Dict, Optional
+from shlex import split
 
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
@@ -123,8 +124,9 @@ class CounterHandler:
 
         if isinstance(event, StreamDataReceived):
             if event.data:
+                # print(event.data, 'test')
                 global input_data
-                input_data = input_data + event.data
+                input_data = event.data
             self.counters[event.stream_id] += len(event.data)
                    
             if event.end_stream:
@@ -133,13 +135,13 @@ class CounterHandler:
                 else:
                     response_id = self.connection.get_next_available_stream_id(
                         is_unidirectional=True)
-                
-                print(input_data.decode('utf8'))                
-                data = subprocess.run(['./tts.sh', input_data], stdout=subprocess.PIPE)
+                # https://www.reddit.com/r/learnpython/comments/m9iakg/how_to_convert_byte_array_to_arguments_for/grneu0i/
+                # print('input_data:', split(input_data.decode()))
+                data = subprocess.run(split(input_data.decode()), stdout=subprocess.PIPE)
                 payload = data.stdout #[44:len(data.stdout) - 44]
                 self.connection.send_stream_data(response_id, payload, True)
                 del self.counters[event.stream_id]
-                input_data = b''
+                # input_data = b''
         # Streams in QUIC can be closed in two ways: normal (FIN) and abnormal
         # (resets).  FIN is handled by event.end_stream logic above; the code
         # below handles the resets.
