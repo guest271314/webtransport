@@ -39,7 +39,7 @@ async function webTransportBreakoutBox(text) {
     const [track] = stream.getAudioTracks();
     const osc = new OscillatorNode(ac, { frequency: 0 });
     const processor = new MediaStreamTrackProcessor(track);
-    const generator = new MediaStreamTrackGenerator('audio');
+    const generator = new MediaStreamTrackGenerator({ kind: 'audio' });
     const { writable } = generator;
     const { readable: audioReadable } = processor;
     const audioWriter = writable.getWriter();
