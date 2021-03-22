@@ -109,9 +109,9 @@ async function webTransportBreakoutBox(text) {
             osc.disconnect();
             track.stop();
             audioReader.releaseLock();
-            audioReadable.cancel();
+            await audioReadable.cancel();
             audioWriter.releaseLock();
-            writable.abort();
+            await writable.abort();
             await writable.closed;
             await ac.close();
             console.log(
