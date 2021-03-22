@@ -100,7 +100,7 @@ async function webTransportBreakoutBox(text) {
             .write(value)
             .then(() => audioReader.read().then(process));
         }
-        if (writeOffset && writeOffset >= readOffset) {
+        if (writeOffset > readOffset) {
           // avoid clipping end of MediaStreamTrackGenerator output
           if (audio.currentTime < duration + value.buffer.duration * 100) {
             return audioReader.read().then(process);
