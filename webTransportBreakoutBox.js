@@ -68,7 +68,7 @@ async function webTransportBreakoutBox(text) {
                 `memory.buffer.byteLength after grow(): ${memory.buffer.byteLength}`
               );
             }
-            let sab = new Uint8Array(memory.buffer);
+            let sab = new Int8Array(memory.buffer);
             let i = 0;
             if (!init) {
               init = true;
@@ -83,7 +83,7 @@ async function webTransportBreakoutBox(text) {
                 console.log(
                   `memory.buffer.byteLength after grow() for loop: ${memory.buffer.byteLength}`
                 );
-                sab = new Uint8Array(memory.buffer);
+                sab = new Int8Array(memory.buffer);
               }
               sab[readOffset] = value[i];
             }
