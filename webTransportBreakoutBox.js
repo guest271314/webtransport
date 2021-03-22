@@ -153,9 +153,9 @@ async function webTransportBreakoutBox(text) {
         });
       }),
     ]);
-    await transportStream.abortReading();
+    transportStream.abortReading();
     await transportStream.readingAborted;
-    await transport.close();
+    transport.close();
     // recorder.stop();
     return transport.closed
       .then((_) => {
