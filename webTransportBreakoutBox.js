@@ -95,14 +95,14 @@ async function webTransportBreakoutBox(text) {
       ),
       audioReader.read().then(async function process({ value, done }) {
         // avoid clipping start of MediaStreamTrackGenerator output
-        if (audio.currentTime < value.buffer.duration * 50) {
+        if (audio.currentTime < value.buffer.duration * 100) {
           return audioWriter
             .write(value)
             .then(() => audioReader.read().then(process));
         }
         if (writeOffset > readOffset) {
           // avoid clipping end of MediaStreamTrackGenerator output
-          if (audio.currentTime < duration + value.buffer.duration * 100) {
+          if (audio.currentTime < duration + value.buffer.duration * 200) {
             return audioReader.read().then(process);
           } else {
             msd.disconnect();
