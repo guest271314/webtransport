@@ -129,7 +129,6 @@ class AudioStream {
       }
     }));
     return this.audioStream();
-
   }
   async audioStream() {
     let channelData = [];
