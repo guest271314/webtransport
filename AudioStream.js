@@ -135,7 +135,7 @@ class AudioStream {
     try {
       await this.ac.resume();
       await this.audioWriter.ready;
-      await Promise.allSettled([
+      await Promise.all([
         this.stdout.pipeTo(
           new WritableStream({
             write: async (value, c) => {
@@ -163,10 +163,11 @@ class AudioStream {
             close: async () => {
               console.log('Done writing input stream.');
               if (channelData.length) {
+                const arr = Array.from({length: this.channelDataLength - channelData.length}, (v, i) => 0);
                 this.inputController.enqueue(
                   new Int16Array(
                     new Uint8Array(
-                      channelData.splice(0, this.channelDataLength)
+                      channelData.splice(0, this.channelDataLength).concat(...arr)
                     ).buffer
                   )
                 );
@@ -179,8 +180,9 @@ class AudioStream {
         this.audioReadable.pipeTo(
           new WritableStream({
             write: async ({ timestamp }) => {
-              const { value, done } = await this.inputReader.read();
+              let { value, done } = await this.inputReader.read();
               if (done) {
+                console.log({ done });
                 await this.inputReader.closed;
                 try {
                   await this.disconnect();
