@@ -119,15 +119,7 @@ class AudioStream {
     const result = await this.reader.read();
     this.transportStream = result.value;
     console.log(this.transport);
-    this.stdout = this.transportStream.readable
-    .pipeThrough(new TransformStream({
-      transform(chunk, c) {
-        c.enqueue(chunk);
-      }, 
-      async flush() {
-        console.log('Done transforming WebTransport incomingUnidirectionalStreams.');      
-      }
-    }));
+    this.stdout = this.transportStream.readable;
     return this.audioStream();
   }
   async audioStream() {
