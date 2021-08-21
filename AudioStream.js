@@ -31,9 +31,15 @@ class AudioStream {
     this.stream = stream;
     const [track] = stream.getAudioTracks();
     this.track = track;
-    this.osc = new OscillatorNode(this.ac, { frequency: 0 });
-    this.processor = new MediaStreamTrackProcessor({ track });
-    this.generator = new MediaStreamTrackGenerator({ kind: 'audio' });
+    this.osc = new OscillatorNode(this.ac, {
+      frequency: 0,
+    });
+    this.processor = new MediaStreamTrackProcessor({
+      track,
+    });
+    this.generator = new MediaStreamTrackGenerator({
+      kind: 'audio',
+    });
     const { writable } = this.generator;
     this.writable = writable;
     const { readable: audioReadable } = this.processor;
@@ -107,7 +113,7 @@ class AudioStream {
     return this.promise;
   }
   async webTransportStream() {
-    await this.transport.ready;   
+    await this.transport.ready;
     this.sender = await this.transport.createUnidirectionalStream();
     this.writer = this.sender.writable.getWriter();
     this.textEncoder = new TextEncoder('utf-8');
@@ -139,11 +145,7 @@ class AudioStream {
               for (; i < value.buffer.byteLength; i++, this.readOffset++) {
                 if (channelData.length === this.channelDataLength) {
                   this.inputController.enqueue(
-                    new Int16Array(
-                      new Uint8Array(
-                        channelData.splice(0, this.channelDataLength)
-                      ).buffer
-                    )
+                    new Int8Array(channelData.splice(0, this.channelDataLength))
                   );
                 }
                 channelData.push(value[i]);
@@ -155,26 +157,25 @@ class AudioStream {
             close: async () => {
               console.log('Done writing input stream.');
               if (channelData.length) {
-                const arr = Array.from({length: this.channelDataLength - channelData.length}, (v, i) => 0);
                 this.inputController.enqueue(
-                  new Int16Array(
-                    new Uint8Array(
-                      channelData.splice(0, this.channelDataLength).concat(...arr)
-                    ).buffer
-                  )
+                  new Int8Array(channelData.splice(0, this.channelDataLength))
                 );
               }
               this.inputController.close();
             },
           }),
-          { signal: this.signal }
+          {
+            signal: this.signal,
+          }
         ),
         this.audioReadable.pipeTo(
           new WritableStream({
             write: async ({ timestamp }) => {
               let { value, done } = await this.inputReader.read();
               if (done) {
-                console.log({ done });
+                console.log({
+                  done,
+                });
                 await this.inputReader.closed;
                 try {
                   await this.disconnect();
@@ -194,12 +195,12 @@ class AudioStream {
                 format: 's16',
                 sampleRate: 22050,
                 numberOfChannels: 1,
-                numberOfFrames: 220,
+                numberOfFrames: value.length / 2,
                 timestamp: this.timestamp * 10 ** 6,
                 data: value,
               });
               this.timestamp += audioData.duration;
-              this.duration += (audioData.duration / 10 ** 6);
+              this.duration += audioData.duration / 10 ** 6;
               if (this.recorder && this.recorder.state === 'inactive') {
                 this.recorder.start();
               }
@@ -212,7 +213,9 @@ class AudioStream {
               console.log('Done reading input stream.');
             },
           }),
-          { signal: this.audioReadableSignal }
+          {
+            signal: this.audioReadableSignal,
+          }
         ),
       ]);
       await this.transport.close();
@@ -229,7 +232,6 @@ class AudioStream {
     }
   }
 }
-
 // var text =  `Test`;
 // var stdin = `espeak-ng -m --stdout "${text}"`;
 // var espeakng = new AudioStream({ stdin });
