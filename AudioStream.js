@@ -145,7 +145,7 @@ class AudioStream {
               for (; i < value.buffer.byteLength; i++, this.readOffset++) {
                 if (channelData.length === this.channelDataLength) {
                   this.inputController.enqueue(
-                    new Int8Array(channelData.splice(0, this.channelDataLength))
+                    new Uint8Array(channelData.splice(0, this.channelDataLength))
                   );
                 }
                 channelData.push(value[i]);
@@ -158,7 +158,7 @@ class AudioStream {
               console.log('Done writing input stream.');
               if (channelData.length) {
                 this.inputController.enqueue(
-                  new Int8Array(channelData.splice(0, this.channelDataLength))
+                  new Uint8Array(channelData.splice(0, this.channelDataLength))
                 );
               }
               this.inputController.close();
