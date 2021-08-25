@@ -1,8 +1,5 @@
 class AudioStream {
   constructor({ stdin, recorder = false }) {
-    if (!/^espeak-ng/.test(stdin)) {
-      throw new Error(`stdin should begin with "espeak-ng" command`);
-    }
     this.command = stdin;
     this.url = 'https://localhost:4433/tts';
     this.transport = new WebTransport(this.url);
