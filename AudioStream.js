@@ -112,17 +112,15 @@ class AudioStream {
   async webTransportStream() {
     await this.transport.ready;
     this.sender = await this.transport.createUnidirectionalStream();
-    this.writer = this.sender.writable.getWriter();
+    console.log(this.sender);
+    this.writer = this.sender.getWriter();
     this.textEncoder = new TextEncoder('utf-8');
     this.inputData = this.textEncoder.encode(this.command);
     await this.writer.write(this.inputData);
     await this.writer.close();
     await this.writer.closed;
     this.reader = this.transport.incomingUnidirectionalStreams.getReader();
-    const result = await this.reader.read();
-    this.transportStream = result.value;
-    console.log(this.transport);
-    this.stdout = this.transportStream.readable;
+    this.stdout = (await this.reader.read()).value;
     return this.audioStream();
   }
   async audioStream() {
