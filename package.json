@@ -1,0 +1,8 @@
+{
+  "name": "webtransport-browser-server",
+  "version": "0.1.0",
+  "description": "WebTransport server implementation for browser Direct Sockets (UDPSocket)",
+  "type": "module",
+  "main": "src/index.js",
+  "license": "MIT"
+}
