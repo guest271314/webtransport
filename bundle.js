@@ -301,131 +301,181 @@ function concatBytes(...arrays) {
 
 // packet.js
 var isLongHeader = (b) => (b & 128) !== 0;
-async function unprotectPacket(data, keys, logger = console) {
-  if (!(data instanceof Uint8Array)) data = new Uint8Array(data);
-  logger.log("[unprotect] packet length:", data.length);
+// Helpers
+function hex(bytes) {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join(
+    " ",
+  );
+}
+function toU8(x) {
+  if (typeof x === "string") {
+    const s = x.replace(/[^0-9a-f]/gi, "");
+    const out = new Uint8Array(s.length / 2);
+    for (let i = 0; i < out.length; i++) {
+      out[i] = parseInt(s.substr(i * 2, 2), 16);
+    }
+    return out;
+  }
+  return x;
+}
+
+// Emulate AES-ECB on one block using AES-CBC with zero IV
+async function hpMaskFromSampleRaw(hpKeyRawU8, sample16) {
+  if (sample16.byteLength !== 16) throw new Error("sample must be 16 bytes");
+  const key = await crypto.subtle.importKey(
+    "raw",
+    hpKeyRawU8,
+    { name: "AES-CBC" },
+    false,
+    ["encrypt"],
+  );
+  const zeroIv = new Uint8Array(16);
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-CBC", iv: zeroIv },
+    key,
+    sample16,
+  );
+  const ctU8 = new Uint8Array(ct);
+  return ctU8.subarray(0, 5);
+}
+
+// RFC9000 PN reconstruction
+function expandPacketNumber(truncated, pnLen, expectedNext) {
+  const pnWindow = 1 << (pnLen * 8);
+  const pnHalf = pnWindow >>> 1;
+  let candidate = Math.floor(expectedNext / pnWindow) * pnWindow + truncated;
+  if (candidate + pnHalf <= expectedNext) candidate += pnWindow;
+  else if (candidate > expectedNext + pnHalf) candidate -= pnWindow;
+  return candidate;
+}
+
+// Build per-packet IV: baseIV XOR packetNumber (big-endian, right-aligned)
+function buildPerPacketIV(baseIVU8, packetNumber) {
+  const iv = new Uint8Array(baseIVU8); // copy
+  for (let i = 0; i < iv.length; i++) {
+    const shift = 8 * (iv.length - 1 - i);
+    const pnByte = (packetNumber >>> shift) & 0xff;
+    iv[i] = iv[i] ^ pnByte;
+  }
+  return iv;
+}
+
+// Main unprotect function
+// - packetBytesU8: Uint8Array of the received packet
+// - hpKeyRawU8: Uint8Array raw header-protection key
+// - expectedNextPacketNumber: number (highest seen + 1 or similar)
+async function unprotectPacket(
+  packetBytesU8,
+  hpKeyRawU8,
+  expectedNextPacketNumber,
+) {
+  if (!(packetBytesU8 instanceof Uint8Array)) {
+    packetBytesU8 = new Uint8Array(packetBytesU8);
+  }
+  const firstByteMasked = packetBytesU8[0];
+
+  // --------- IMPORTANT: compute pnOffset for your header form here ----------
+  // If packet is short-header and you have no extra fields: pnOffset = 1
+  // If packet is long-header you MUST parse Version, DCID length, DCID, SCID length, SCID, Length fields etc.
+  // Replace the following according to how your code parses headers:
+  const pnOffset = 1; // <-- ADAPT for long-header / connection IDs in your implementation
+  // ------------------------------------------------------------------------
+
+  const pnLen = (firstByteMasked & 0x03) + 1;
+  const sampleOffset = pnOffset + pnLen;
+  if (sampleOffset + 16 > packetBytesU8.length) {
+    throw new Error("not enough bytes for sample");
+  }
+
+  const sample = packetBytesU8.subarray(sampleOffset, sampleOffset + 16);
+  const mask = await hpMaskFromSampleRaw(hpKeyRawU8, sample);
+
+  // Unmask
+  const firstByteUnmasked = firstByteMasked ^ (mask[0] & 0x0f);
+  const pnBytesMasked = packetBytesU8.subarray(pnOffset, pnOffset + pnLen);
+  const pnBytesUnmasked = new Uint8Array(pnLen);
+  for (let i = 0; i < pnLen; i++) {
+    pnBytesUnmasked[i] = pnBytesMasked[i] ^ mask[1 + i];
+  }
+
+  // truncated -> number
+  let truncated = 0;
+  for (let i = 0; i < pnLen; i++) {
+    truncated = (truncated << 8) + pnBytesUnmasked[i];
+  }
+  const fullPn = expandPacketNumber(truncated, pnLen, expectedNextPacketNumber);
+
+  // AAD: header bytes up to and including unmasked PN bytes
+  const aad = new Uint8Array(pnOffset + pnLen);
+  aad[0] = firstByteUnmasked;
+  if (pnOffset > 1) {
+    for (let i = 1; i < pnOffset; i++) aad[i] = packetBytesU8[i];
+  }
+  for (let i = 0; i < pnLen; i++) aad[pnOffset + i] = pnBytesUnmasked[i];
+
+  const ciphertext = packetBytesU8.subarray(pnOffset + pnLen);
+
+  // Debug logs (copy these into your console and paste them here if it still fails)
   console.log(
-    "packet first20:",
-    Array.from(data.slice(0, 20)).map((b) => b.toString(16).padStart(2, "0"))
-      .join(" "),
+    "[unprotect] pnOffset",
+    pnOffset,
+    "pnLen",
+    pnLen,
+    "sampleOffset",
+    sampleOffset,
+  );
+  console.log("[unprotect] sample", hex(sample), "mask", hex(mask));
+  console.log(
+    "[unprotect] firstByteMasked",
+    hex(new Uint8Array([firstByteMasked])),
+  );
+  console.log(
+    "[unprotect] firstByteUnmasked",
+    hex(new Uint8Array([firstByteUnmasked])),
+  );
+  console.log("[unprotect] pnBytesMasked", hex(pnBytesMasked));
+  console.log("[unprotect] pnBytesUnmasked", hex(pnBytesUnmasked));
+  console.log("[unprotect] truncated", truncated, "fullPn", fullPn);
+  console.log(
+    "[unprotect] aad len",
+    aad.length,
+    "ciphertext len",
+    ciphertext.length,
   );
 
-  if (data.length < 7) throw new Error("packet too short");
-  const dcidLen = data[5];
-  const scidLenOffset = 6 + dcidLen;
-  if (data.length <= scidLenOffset) {
-    throw new Error("packet too short for scid length");
-  }
-  const scidLen = data[scidLenOffset];
-  let offset = scidLenOffset + 1 + scidLen;
-  if (offset >= data.length) throw new Error("packet too short after scid");
-  const getVarInt = () => {
-    if (offset >= data.length) throw new Error("varint index OOB");
-    const first = data[offset++];
-    const len = 1 << (first >> 6);
-    let val = BigInt(first & 63);
-    for (let i = 1; i < len; i++) {
-      if (offset >= data.length) throw new Error("varint overflow");
-      val = val << 8n | BigInt(data[offset++]);
-    }
-    return Number(val);
-  };
-  const tokenLen = getVarInt();
-  if (offset + tokenLen > data.length) throw new Error("token length OOB");
-  offset += tokenLen;
-  const lengthField = getVarInt();
-  if (offset + lengthField > data.length) throw new Error("length field OOB");
-  const pnOffset = offset;
-  logger.log("[unprotect] pnOffset:", pnOffset, "lengthField:", lengthField);
-  const sampleStart = pnOffset + 4;
-  const sampleEnd = sampleStart + 16;
-  if (sampleEnd > data.length) {
-    throw new Error("not enough bytes for header protection sample");
-  }
-  const sample = data.slice(sampleStart, sampleEnd);
-  logger.log(
-    "[unprotect] sample (hex):",
-    Array.from(sample).map((b) => b.toString(16).padStart(2, "0")).join(" "),
+  return { aad, ciphertext, fullPn };
+}
+
+// AEAD decrypt wrapper (AES-GCM example)
+async function decryptAead(
+  aeadKeyRawU8,
+  baseIVU8,
+  aadU8,
+  ciphertextU8,
+  packetNumber,
+) {
+  const aeadKey = await crypto.subtle.importKey(
+    "raw",
+    aeadKeyRawU8,
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"],
   );
-  const mask = await generateHeaderProtectionMask(keys.hp, sample);
-  logger.log(
-    "[unprotect] mask (hex):",
-    Array.from(mask).map((b) => b.toString(16).padStart(2, "0")).join(" "),
-  );
-  const firstByteMasked = data[0];
-  const firstByteUnmasked = firstByteMasked ^ mask[0] & 15;
-  logger.log(
-    "[unprotect] firstByteMasked:",
-    firstByteMasked.toString(16),
-    "firstByteUnmasked:",
-    firstByteUnmasked.toString(16),
-  );
-  const pnLen = (firstByteUnmasked & 3) + 1;
-  if (pnLen < 1 || pnLen > 4) throw new Error("invalid pn length");
-  logger.log("[unprotect] pnLen:", pnLen);
-  if (pnOffset + pnLen > data.length) throw new Error("pn bytes OOB");
-  const pnBytes = new Uint8Array(pnLen);
-  for (let i = 0; i < pnLen; i++) {
-    pnBytes[i] = data[pnOffset + i] ^ mask[i + 1];
-  }
-  logger.log(
-    "[unprotect] pnBytes (hex):",
-    Array.from(pnBytes).map((b) => b.toString(16).padStart(2, "0")).join(" "),
-  );
-  let pn = 0n;
-  for (let i = 0; i < pnLen; i++) {
-    pn = pn << 8n | BigInt(pnBytes[i]);
-  }
-  logger.log("[unprotect] pn numeric:", pn.toString());
-  const aad = concatBytes(
-    new Uint8Array([
-      firstByteUnmasked,
-    ]),
-    data.slice(1, pnOffset),
-    pnBytes,
-  );
-  logger.log("[unprotect] aad length:", aad.length);
-  const ciphertextStart = pnOffset + pnLen;
-  const ciphertextEnd = pnOffset + lengthField;
-  if (ciphertextEnd > data.length) throw new Error("ciphertext end OOB");
-  const ciphertext = data.slice(ciphertextStart, ciphertextEnd);
-  logger.log("[unprotect] ciphertext length:", ciphertext.length);
+  const iv = buildPerPacketIV(baseIVU8, packetNumber);
+  console.log("[decrypt] baseIV", hex(baseIVU8), "perPacketIV", hex(iv));
   try {
-    const plaintextBuf = await crypto.subtle.decrypt(
-      {
-        name: "AES-GCM",
-        iv: constructNonce(keys.iv, Number(pn)),
-        additionalData: aad,
-      },
-      keys.key,
-      ciphertext,
+    const plainBuf = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv, additionalData: aadU8 },
+      aeadKey,
+      ciphertextU8,
     );
-    const plaintext = new Uint8Array(plaintextBuf);
-    logger.log(
-      "[unprotect] decrypt succeeded, plaintext len:",
-      plaintext.length,
-    );
-    return {
-      pn: Number(pn),
-      plaintext,
-    };
-  } catch (err) {
-    logger.error("[unprotect] decrypt failed:", err);
-    logger.error("[unprotect] debug context:", {
-      firstByteMasked: firstByteMasked.toString(16),
-      firstByteUnmasked: firstByteUnmasked.toString(16),
-      pnLen,
-      pnBytes: Array.from(pnBytes),
-      sample: Array.from(sample),
-      mask: Array.from(mask),
-      ciphertextHex: Array.from(ciphertext).slice(0, 64).map((b) =>
-        b.toString(16).padStart(2, "0")
-      ).join(" "),
-      ciphertextLen: ciphertext.length,
-    });
-    throw err;
+    return new Uint8Array(plainBuf);
+  } catch (e) {
+    console.error("AEAD decrypt error:", e);
+    throw e;
   }
 }
+
 async function protectPacket(headerBase, pn, payload, keys) {
   if (!(headerBase instanceof Uint8Array)) {
     headerBase = new Uint8Array(headerBase);
@@ -582,4 +632,47 @@ var certData =
   (await Promise.resolve().then(() => __toESM(require_cert()))).default;
 var server = new WebTransportEchoServer(certData);
 server.start("127.0.0.1", 4433);
-export { WebTransportEchoServer };
+
+// export { WebTransportEchoServer };
+var json = (await import("./export/cert.json", {
+  with: {
+    type: "json",
+  },
+})).default;
+
+async function testEcho(config) {
+  const url = "https://127.0.0.1:4433";
+  console.log(`⏳ Connecting to WebTransport server at ${url}...`);
+
+  try {
+    const transport = new WebTransport(url, {
+      serverCertificateHashes: [
+        {
+          algorithm: "sha-256",
+          value: new Uint8Array(config.hash.digest),
+        },
+      ],
+    });
+
+    await transport.ready;
+    console.log("✅ WebTransport is ready!");
+
+    // Test Datagrams
+    const writer = transport.datagrams.writable.getWriter();
+    const data = new TextEncoder().encode("Hello WebTransport Echo!");
+    await writer.write(data);
+    console.log("📤 Sent Datagram:", new TextDecoder().decode(data));
+
+    const reader = transport.datagrams.readable.getReader();
+    const { value } = await reader.read();
+    console.log("📥 Received Echo:", new TextDecoder().decode(value));
+  } catch (e) {
+    console.error("❌ Test Failed:", e);
+  }
+}
+
+// Usage:
+// testEcho(json[0]);
+
+testEcho(json[0]).catch(console.log);
+// https://gemini.google.com/share/a34176ee9792
