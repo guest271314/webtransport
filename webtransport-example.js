@@ -299,7 +299,7 @@ async function main({
   let lastRemote = null;
   let timer = true;
   // --- Load WASM with runtime certs ---
-  const wasm = await loadWasm("./quic-wasm.js", "./cert.der", "./key.der");
+  const wasm = await loadWasm("./quic.wasm", "./cert.der", "./key.der");
   wasm.qz_init_server();
   console.log("WASM QUIC server initialized");
 
