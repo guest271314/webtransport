@@ -1,4 +1,4 @@
-// https://github.com/endel/quic-zig/blob/wasm-experiment/wasm/webtransport-example.js
+// https://github.com/endel/quic-zig/tree/wasm-experiment
 /**
  * WebTransport client example using quic-zig WASM as the QUIC server.
  *
@@ -21,11 +21,12 @@
  *
  *   1. WT client sends "hello" on a bidi stream
  *   2. Chrome encodes it as QUIC packets, arrives at UDPSocket
- *   3. feedPacket() copies Uint8Array into WASM memory → qz_recv_packet()
+ *   3. feedPacket() copies Uint8Array into WASM memorFailed to establish a connection to https://127.0.0.1:4433/: net::ERR_QUIC_PROTOCOL_ERROR.QUIC_NETWORK_IDLE_TIMEOUT (No recent network activity after 4001042us. Timeout:4s num_undecryptable_packets: 0 {}).
+wt-client.js:1 Uncaught WebTransportError: Opening handshake failed.y → qz_recv_packet()
  *   4. qz_poll_event() returns EVT_WT_SESSION (CONNECT request)
  *   5. qz_wt_accept_session() sends HTTP/3 200
  *   6. qz_poll_event() returns EVT_WT_BIDI_STREAM (new bidi stream)
- *   7. qz_poll_event() returns EVT_WT_STREAM_DATA (data available)
+ *   7. qz_poll_eventconst certHash = await crypto.subtle.digest("SHA-256", certDer);() returns EVT_WT_STREAM_DATA (data available)
  *   8. qz_wt_read_stream() → "hello"        ← YOUR DECODED DATA IS HERE
  *   9. qz_wt_send_stream() ← "Echo: hello"  ← YOU WRITE RESPONSE DATA HERE
  *  10. qz_wt_close_stream()
@@ -36,40 +37,72 @@
 // ============================================================================
 // STEP 1: Load WASM and set certificates
 // ============================================================================
+// import certificate from "./cert.json" with {type: "json"};
+const runtime = navigator.userAgent;
+let readFile = null;
+let createSocket;
+if (/Node.js|Deno|Bun/.test(runtime)) {
+  ({ readFile } = await import("node:fs/promises" + ""));
+  ({ createSocket } = await import("node:dgram" + ""));
+} else {
+  if (/txiki.js/.test(runtime)) {
+    readFile = tjs.readFile;
+  }
+}
+
+if (readFile === null) {
+  readFile = async function (url) {
+    return fetch(new URL(url, location.href))
+      .then((r) => r.arrayBuffer());
+  };
+}
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 let _sessionId = BigInt(0);
+let interval = Promise.resolve();
 
 async function loadWasm(wasmUrl, certDerUrl, keyDerUrl) {
-  const [wasmBytes,certDer,keyDer] = await Promise.all([fetch(wasmUrl).then( (r) => r.arrayBuffer()), fetch(certDerUrl).then( (r) => r.arrayBuffer()), fetch(keyDerUrl).then( (r) => r.arrayBuffer()), ]);
+  const [wasmBytes, certDer, keyDer] = await Promise.all([
+    readFile(wasmUrl),
+    readFile(certDerUrl),
+    readFile(keyDerUrl),
+  ]);
+  // Import Memory into WASM from host
   /*
   const memory = new WebAssembly.Memory({
     initial: 85,
     maximum: 320,
-  });
+  });node dgam drain
   */
-
-  // forward-declare so imports can reference it
-  const {instance} = await WebAssembly.instantiate(wasmBytes, {
+  const { instance } = await WebAssembly.instantiate(wasmBytes, {
     env: {
       // memory,
       get_time_ns: () => BigInt(Math.round(performance.now() * 1_000_000)),
       console_log: (ptr, len) => {
-        const bytes = new Uint8Array(instance.exports.memory.buffer,ptr,len);
-        console.log("[wasm]", new TextDecoder().decode(bytes));
-      }
-      ,
+        const bytes = new Uint8Array(instance.exports.memory.buffer, ptr, len);
+        console.log("[wasm]", decoder.decode(bytes));
+      },
       random_fill: (ptr, len) => {
-        crypto.getRandomValues(new Uint8Array(instance.exports.memory.buffer,ptr,len), );
-      }
-      ,
+        crypto.getRandomValues(
+          new Uint8Array(instance.exports.memory.buffer, ptr, len),
+        );
+      },
     },
   });
   const wasm = instance.exports;
-
+  // console.log(wasm);
   // Set runtime certificates before init
-  copyToWasm(wasm, new Uint8Array(certDer), (ptr, len) => wasm.qz_set_cert(ptr, len), );
-  copyToWasm(wasm, new Uint8Array(keyDer), (ptr, len) => wasm.qz_set_key(ptr, len), );
+  copyToWasm(
+    wasm,
+    new Uint8Array(certDer),
+    (ptr, len) => wasm.qz_set_cert(ptr, len),
+  );
+  copyToWasm(
+    wasm,
+    new Uint8Array(keyDer),
+    (ptr, len) => wasm.qz_set_key(ptr, len),
+  );
 
   return wasm;
 }
@@ -80,7 +113,13 @@ async function loadWasm(wasmUrl, certDerUrl, keyDerUrl) {
 
 // Copy a Uint8Array into WASM memory, call fn(ptr, len), then free.
 function copyToWasm(wasm, data, fn) {
-  if (data.byteLength === 0) {
+  if (!data) {
+    console.log({ data }); 
+    process.exit();
+  };
+  // data can be undefined here...
+  if (data === void 0 || data.byteLength === 0) {
+    
     return fn(0, 0);
   }
   const ptr = wasm.qz_alloc(data.byteLength);
@@ -161,7 +200,11 @@ const EVT_WT_DATAGRAM = 0x09;
 const EVT_WT_SESSION_CLOSED = 0x0a;
 
 function pollEvents(wasm, handlers) {
-  const BUF = 1024;
+  // Must match MAX_EVENT_SIZE in wasm_api.zig — currently 1039 to fit a
+  // session_closed event with a max-size 1024-byte reason. popEvent returns
+  // 0 when the caller's buffer is smaller than the event, which would
+  // silently drop the event and stall the poll loop.
+  const BUF = 1039;
   const ptr = wasm.qz_alloc(BUF);
 
   while (true) {
@@ -232,9 +275,22 @@ function pollEvents(wasm, handlers) {
 
       // ── WT session closed by peer ──
       case EVT_WT_SESSION_CLOSED: {
-        const sessionId = view.getBigUint64(1);
-        const errorCode = view.getUint32(9);
-        handlers.onSessionClosed?.(sessionId, errorCode);
+        // Use false for big-endian to match Zig's .big
+        const sessionId = view.getBigUint64(1, false);
+        const errorCode = view.getUint32(9, false);
+
+        // Read the 2-byte length of the reason sequence
+        const reasonLen = view.getUint16(13, false);
+
+        // Slice the byte sequence and decode it
+        const reasonBytes = new Uint8Array(
+          view.buffer,
+          view.byteOffset + 15,
+          reasonLen,
+        );
+        const reason = new TextDecoder().decode(reasonBytes);
+
+        handlers.onSessionClosed?.(sessionId, errorCode, reason);
         break;
       }
     }
@@ -304,18 +360,22 @@ async function main({
   console.log("WASM QUIC server initialized");
 
   // --- Compute cert hash for WebTransport client ---
-  const certDer = await fetch("./cert.der").then((r) => r.arrayBuffer());
+  const certDer = await readFile("./cert.der");
   const certHash = await crypto.subtle.digest("SHA-256", certDer);
   const CERT_DIGEST = new Uint8Array(certHash);
   console.log(
     "Cert SHA-256:",
     [...CERT_DIGEST].map((b) => b.toString(16).padStart(2, "0")).join(""),
   );
+  console.log(
+    "Cert SHA-256:",
+    [...CERT_DIGEST].map((b) => b.toString(16).padStart(2, "0")).join(""),
+  );
 
   // --- Open UDP socket ---
-  //const socket = new UDPSocket({ localPort: 4433, localAddress: "0.0.0.0" });
-  //const { readable, writable } = await socket.opened;
-  //const writer = writable.getWriter();
+  // const socket = new UDPSocket({ localPort: 4433, localAddress: "0.0.0.0" });
+  // const { readable, writable } = await socket.opened;
+  // const writer = writable.getWriter();
   // let lastRemote = null;
 
   // Helper: send all pending WASM packets to the remote peer
@@ -382,7 +442,7 @@ async function main({
       try {
         console.log(`Stream ${streamId} finished (remote FIN)`);
         while (writer.desiredSize < 1) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
+          await new Promise((resolve) => setTimeout(resolve, 1));
         }
         timer = false;
         // Peer closed their send side — close ours too.
@@ -423,8 +483,8 @@ async function main({
       wasm.qz_free(ptr, BUF);
     },
 
-    onSessionClosed(sessionId, errorCode) {
-      console.log(`WT session ${sessionId} closed, code=${errorCode}`);
+    onSessionClosed(sessionId, errorCode, reason) {
+      console.log(`WT session ${sessionId} closed, code=${errorCode}, reason=${reason}`);
       timer = false;
       wasm.qz_wt_close_session(_sessionId);
       wasm.qz_deinit();
@@ -439,7 +499,7 @@ async function main({
   };
 
   // --- Receive loop: UDP → WASM → process → UDP ---
-  let processStream = (async () => {
+  const processStream = (async () => {
     while (true) {
       const {
         value,
@@ -479,48 +539,154 @@ async function main({
   })().catch(console.log);
 
   // --- Timer loop: handle QUIC retransmits, PTO, keepalives ---
-  // interval = setInterval(() => {
-  interval = (async () => {
+  interval.then(async () => {
     while (timer) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
       wasm.qz_on_timeout();
       pollEvents(wasm, handlers);
       flushToNetwork();
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
-  })().catch(console.log);
-  // }, 50);
+  }).catch(console.log);
 
   // --- Connect the browser's WebTransport client ---
   console.log("Waiting for WebTransport client connection...");
   console.log("Connect with:");
   console.log(`
-  const wt = new WebTransport("https://127.0.0.1:4433", {
+  var wt = new WebTransport("https://127.0.0.1:4433",{
     serverCertificateHashes: [{
       algorithm: "sha-256",
-      value: new Uint8Array([${[...CERT_DIGEST].join(",")}]).buffer,
+      value: new Uint8Array([${[...CERT_DIGEST].join(",")}]),
     }],
   });
   await wt.ready;
-
-  // Send on a bidi stream:
-  const stream = await wt.createBidirectionalStream();
-  const writer = stream.writable.getWriter();
-  await writer.write(new TextEncoder().encode("hello"));
-  await writer.close();
-
   // Read the echo back:
-  const reader = stream.readable.getReader();
-  const { value } = await reader.read();  // ← "Echo: hello"
-  console.log(new TextDecoder().decode(value));
+  var data = new Uint8Array(1024 ** 2);
+  var len = 0;
+  wt.closed.then(console.log).catch(console.error);
+  // Send on a bidi stream:
+  var wt_stream = await wt.createBidirectionalStream().catch(console.log);
+  var wt_writer = wt_stream.writable.getWriter();
+  await wt_writer.ready;
+  // Read the echo back:
+  wt_stream.readable.pipeTo(new WritableStream({
+    write(value) {
+      console.log(len += value.length);
+      if (len === data.length) {
+        // Chrome, Bun, Deno generally get here, Node.js and txiki.js don't
+        console.log("Echo roundtrip complete");
+        len = 0;
+      }
+    },
+    close() {
+      console.log("readable close");
+    },
+    abort(reason) {
+      console.log(reason);
+    }
+  })).catch(console.log);
+  await wt_writer.write(data);
+  // await wt_writer.close();
+  // wt.close({ closeCode: 4999, reason: "Done streaming." });
   `);
   return Promise.allSettled([reader.closed, writer.closed]).catch(console.log);
 }
 
-// Uncomment to run:
-// main().catch(console.error);
+// Direct Sockets UDPSocket polyfill
+class DirectSocketsUDPSocket {
+  #socket;
+  #opened;
+  #closed;
+  #resolveOpened;
+  #rejectOpened;
+  #resolveClosed;
+  constructor(options = {}) {
+    const type = options.ipv6Only ? "udp6" : "udp4";
+    this.#socket = createSocket({
+      type,
+      reuseAddr: true //options.reuseAddr || options.multicastAllowAddressSharing,
+    });
+    this.#opened = new Promise((resolve, reject) => {
+      this.#resolveOpened = resolve;
+      this.#rejectOpened = reject;
+    });
+    this.#closed = new Promise((resolve) => {
+      this.#resolveClosed = resolve;
+    });
+    this.#init(options);
+  }
+  #init(options) {
+    this.#socket.on("error", (err) => {
+      this.#rejectOpened(err);
+      this.close();
+    });
+    this.#socket.bind({
+      address: options.localAddress,
+      port: options.localPort,
+    }, () => {
+      const addr = this.#socket.address();
+      const readable = new ReadableStream({
+        start: (controller) => {
+          this.#socket.on("message", (msg, rinfo) => {
+            controller.enqueue({
+              data: new Uint8Array(msg.buffer),
+              remoteAddress: rinfo.address,
+              remotePort: rinfo.port,
+            });
+          });
+        },
+      });
+      const writable = new WritableStream({
+        write: async (message) => {
+          return new Promise((resolve, reject) => {
+            this.#socket.send(
+              message.data,
+              message.remotePort,
+              message.remoteAddress,
+              (err) => {
+                if (err) reject(err);
+                else resolve();
+              },
+            );
+          });
+        },
+      });
+      this.#resolveOpened({
+        readable,
+        writable,
+        localAddress: addr.address,
+        localPort: addr.port,
+        // TODO
+        // multicastController: new MulticastControllerImpl(this.#socket),
+      });
+    });
+  }
+  get opened() {
+    return this.#opened;
+  }
+  get closed() {
+    return this.#closed;
+  }
+  close() {
+    try {
+      this.#socket.close();
+    } catch (e) {
+      // Already closed
+      console.log(e);
+    }
+    this.#resolveClosed();
+  }
+}
 
-const WebTransportServerSocket = new ReadableStream({
-  start(controller) {
+if (!Object.hasOwn(globalThis, "UDPSocket")) {
+  globalThis.UDPSocket = class UDPSocket extends DirectSocketsUDPSocket {
+    constructor(options) {
+      super(options);
+    }
+  };
+}
+
+const stream = new ReadableStream({
+  async start(controller) {
     console.log("Starting WebTransportServerSocket");
   },
   async pull(controller) {
@@ -528,25 +694,30 @@ const WebTransportServerSocket = new ReadableStream({
       localPort: 4433,
       localAddress: "0.0.0.0",
     });
-
     controller.enqueue({
       socket,
     });
+    await socket.closed;
+    // For Deno, to prevent Error: bind EADDRINUSE 0.0.0.0:4433
+    // pull() is called immediately
+    if (runtime.startsWith("Deno")) {
+      // await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   },
   cancel(reason) {
     console.log({ reason });
   },
 });
 
-
-(async () => {
-  for await (const { socket } of WebTransportServerSocket) {
+async function webTransportServerSocket(socketStream) {
+  for await (const { socket } of socketStream) {
     try {
       const { readable, writable } = await socket.opened.catch((e) => {
         console.log(e);
         throw e;
       });
-      console.log(socket, readable, writable);
+     
+      // console.log(socket, readable, writable);
       socket.closed.then(console.log).catch(console.log);
       const writer = writable.getWriter();
       const reader = readable.getReader();
@@ -561,12 +732,101 @@ const WebTransportServerSocket = new ReadableStream({
         console.log(e);
       });
       socket.close();
+      await socket.closed;
     } catch (e) {
-      console.log({
-        e,
-      });
+      console.error(e);
+      break;
     } finally {
-      continue;
+       continue;
     }
   }
-})().catch(console.log);
+}
+
+webTransportServerSocket(stream).catch(console.log);
+
+/*
+class UDPDemultiplexer {
+  #sessions = new Map();
+
+  constructor(socket) {
+    this.socket = socket;
+  }
+
+  async start(sessionHandler) {
+    // Await the opened promise and destructure the stream objects
+    const openedInfo = await this.socket.opened;
+    if (!openedInfo || !openedInfo.readable) {
+        throw new Error("Socket failed to provide a readable stream");
+    }
+
+    const { readable, writable } = openedInfo;
+    const reader = readable.getReader();
+    const writer = writable.getWriter();
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const sessionKey = `${value.remoteAddress}:${value.remotePort}`;
+
+        if (!this.#sessions.has(sessionKey)) {
+          const session = this.#createSession(sessionKey, writer, value.remoteAddress, value.remotePort);
+          this.#sessions.set(sessionKey, session);
+
+          sessionHandler(session).finally(() => {
+            this.#sessions.delete(sessionKey);
+          });
+        }
+
+        const { controller } = this.#sessions.get(sessionKey);
+        controller.enqueue(value.data);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  #createSession(key, sharedWriter, remoteAddress, remotePort) {
+    let controller;
+    const readable = new ReadableStream({
+      start(c) { controller = c; }
+    });
+
+    const writable = new WritableStream({
+      write: (chunk) => sharedWriter.write({
+        data: chunk,
+        remoteAddress,
+        remotePort
+      })
+    });
+
+    return { readable, writable, controller };
+  }
+}
+
+(async () => {
+  const serverSocket = new UDPSocket({
+    localPort: 4433,
+    localAddress: "0.0.0.0",
+    reuseAddr: true
+  });
+
+  const mux = new UDPDemultiplexer(serverSocket);
+
+  console.log("Server listening on 4433...");
+
+  // This will trigger for EVERY unique client IP/Port combo
+  await mux.start(async ({ reader, writer }) => {
+    try {
+      console.log("New virtual session detected");
+
+      // Run your WebTransport/App logic here
+      await main({ reader, writer });
+
+    } catch (e) {
+      console.error("Session error:", e);
+    }
+  });
+})();
+*/

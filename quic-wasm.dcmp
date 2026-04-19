@@ -22646,7 +22646,7 @@ function f_ng(a:int, b:long_ptr@2) { // func195
   a[2]:short = 1;
   goto B_c;
   label B_d:
-  d = f_og(c, 344720, 3, c);
+  d = f_og(c, 345232, 3, c);
   if (d) goto B_e;
   a[2]:short = 1;
   goto B_c;
@@ -22696,11 +22696,11 @@ function f_ng(a:int, b:long_ptr@2) { // func195
   d[77952]:int = g;
   (d + 311869)[0]:long@1 = 0L;
   (d + 311877)[0]:short@1 = 0;
-  if (eqz(32838)) goto B_i;
-  memory_fill(d + 311880, 0, 32838);
+  if (eqz(33350)) goto B_i;
+  memory_fill(d + 311880, 0, 33350);
   label B_i:
-  d[344718]:byte = c[22]:ubyte;
-  d[344719]:byte = c[21]:ubyte;
+  d[345230]:byte = c[22]:ubyte;
+  d[345231]:byte = c[21]:ubyte;
   if (h) goto B_j;
   (c + 24 + 16)[0]:short = 0;
   (c + 24 + 8)[0]:long = 0L;
@@ -23074,7 +23074,7 @@ function f_ng(a:int, b:long_ptr@2) { // func195
   if (b) goto B_va;
   memory_copy(g, c + 48, 151232);
   label B_va:
-  d[344719]:byte = 1;
+  d[345231]:byte = 1;
   label B_j:
   a[0]:long@4 = 0L;
   0[1359883]:int = d;
@@ -33372,7 +33372,7 @@ export function qz_deinit() { // func319
   g_a = a;
   var b:int = 0[1359883]:int;
   if (eqz(b)) goto B_a;
-  if (eqz(b[344719]:ubyte)) goto B_b;
+  if (eqz(b[345231]:ubyte)) goto B_b;
   c = b[77952]:int;
   if (eqz(c[52536]:ubyte)) goto B_c;
   var d:long = env_get_time_ns();
@@ -33487,7 +33487,7 @@ export function qz_deinit() { // func319
   }
   label B_b:
   f_ol(c, b[77952]:int, 151232, 4, c);
-  f_ol(c, b, 344720, 3, c);
+  f_ol(c, b, 345232, 3, c);
   0[1359883]:int = 0;
   label B_a:
   g_a = a + 528;
@@ -34349,8 +34349,8 @@ export function qz_recv_packet(a:int, b:ubyte_ptr):int { // func336
   if (d) goto B_d;
   memory_fill(c + 152, 0, 128);
   label B_d:
-  if (eqz(e[344718]:ubyte)) goto B_f;
-  if (e[344719]:ubyte) goto B_f;
+  if (eqz(e[345230]:ubyte)) goto B_f;
+  if (e[345231]:ubyte) goto B_f;
   c[73]:int = 0;
   c[72]:int = g;
   c[71]:int = f;
@@ -34876,7 +34876,7 @@ export function qz_recv_packet(a:int, b:ubyte_ptr):int { // func336
   if (d) goto B_qb;
   memory_copy(h, c + 432, 151232);
   label B_qb:
-  e[344719]:byte = 1;
+  e[345231]:byte = 1;
   label B_f:
   c[151664]:byte = 0;
   d = e[77952]:int;
@@ -34923,7 +34923,7 @@ export function qz_recv_packet(a:int, b:ubyte_ptr):int { // func336
   b = e[77952]:int;
   if (b[151229] != 2) goto B_e;
   if (e[174496]:ubyte) goto B_e;
-  c[153024]:byte = e[344718]:ubyte & 1;
+  c[153024]:byte = e[345230]:ubyte & 1;
   d = eqz(48);
   if (d) goto B_xb;
   memory_fill(c + 496872 + 86560, 0, 48);
@@ -35030,7 +35030,7 @@ export function qz_recv_packet(a:int, b:ubyte_ptr):int { // func336
   if (f_wl(b, c[76076]:int, c[76078]:int) & 65535) goto B_ic;
   e[174490]:byte = 1;
   label B_ic:
-  c[152712]:byte = (a = (b = e[344718]:ubyte) & 1);
+  c[152712]:byte = (a = (b = e[345230]:ubyte) & 1);
   d = e[77952]:int;
   if (eqz(4160)) goto B_kc;
   memory_copy(e + 174504, 5408216, 4160);
@@ -36381,14 +36381,14 @@ function f_zl(a:int, b:int, c:int, d:int):int { // func337
 }
 
 function f_am(a:int, b:int, c:int) { // func338
-  if (a[172358]:ushort >= 32) goto B_a;
-  var d:short_ptr = a + a[172357]:ushort * 1026;
+  if (a[172614]:ushort >= 32) goto B_a;
+  var d:short_ptr = a + a[172613]:ushort * 1042;
   if (eqz(c)) goto B_b;
   memory_copy(d + 311882, b, c);
   label B_b:
   d[155940] = c;
-  a[172358]:short = a[172358]:ushort + 1;
-  a[172357]:short = a[172357]:ushort + 1 & 31;
+  a[172614]:short = a[172614]:ushort + 1;
+  a[172613]:short = a[172613]:ushort + 1 & 31;
   label B_a:
 }
 
@@ -44664,7 +44664,7 @@ export function qz_send_packets(a:int_ptr@1, b:int):int { // func416
   var d:int = 0;
   var e:int = 0[1359883]:int;
   if (eqz(e)) goto B_a;
-  if (eqz(e[344719]:ubyte)) goto B_a;
+  if (eqz(e[345231]:ubyte)) goto B_a;
   var f:long_ptr = c + 3648 + 24;
   d = 0;
   loop L_b {
@@ -45323,7 +45323,7 @@ export function qz_on_timeout() { // func422
   g_a = a;
   var b:int = 0[1359883]:int;
   if (eqz(b)) goto B_a;
-  if (eqz(b[344719]:ubyte)) goto B_a;
+  if (eqz(b[345231]:ubyte)) goto B_a;
   var c:int = b[77952]:int;
   if (c[151229]:ubyte == 5) goto B_a;
   var d:long = env_get_time_ns();
@@ -45831,7 +45831,7 @@ export function qz_next_timeout_ns():long { // func423
   var b:long = -1L;
   var c:int = 0[1359883]:int;
   if (eqz(c)) goto B_a;
-  if (eqz(c[344719]:ubyte)) goto B_a;
+  if (eqz(c[345231]:ubyte)) goto B_a;
   b = -1L;
   var d:int = c[77952]:int;
   c = d[151229]:ubyte;
@@ -45929,7 +45929,7 @@ export function qz_is_established():int { // func424
   var a:int = 0;
   var b:int = 0[1359883]:int;
   if (eqz(b)) goto B_a;
-  if (eqz(b[344719]:ubyte)) goto B_a;
+  if (eqz(b[345231]:ubyte)) goto B_a;
   a = (b[77952]:int)[151229]:ubyte == 2;
   label B_a:
   return a;
@@ -45939,7 +45939,7 @@ export function qz_is_closed():int { // func425
   var a:int = 0;
   var b:int = 0[1359883]:int;
   if (eqz(b)) goto B_a;
-  if (eqz(b[344719]:ubyte)) goto B_a;
+  if (eqz(b[345231]:ubyte)) goto B_a;
   a = (b[77952]:int)[151229]:ubyte == 5;
   label B_a:
   return a;
@@ -49145,12 +49145,12 @@ function f_mq(a:int_ptr, b:long) { // func454
 }
 
 export function qz_poll_event(a:int, b:int):int { // func455
-  var i:long;
-  var j:ushort_ptr;
-  var l:long;
-  var k:int;
+  var j:long;
+  var k:ushort_ptr;
+  var l:int;
+  var m:long;
   var f:int;
-  var c:int = g_a - 160;
+  var c:int = g_a - 1184;
   g_a = c;
   var d:int = 0;
   var e:int = 0[1359883]:int;
@@ -49159,100 +49159,106 @@ export function qz_poll_event(a:int, b:int):int { // func455
   f = e + 174504;
   var g:int = e + 180224;
   var h:int = e + 246016;
+  var i:int = c + 145 + 15;
   loop L_c {
-    if (e[172358]:ushort > 31) goto B_b;
+    if (e[172614]:ushort > 31) goto B_b;
     f_iq(c + 8, f);
     if (c[32]:ushort) goto B_b;
     if (eqz(c[56]:ubyte & 255)) goto B_b;
     br_table[B_h, B_g, L_c, B_d, B_f, B_e, ..L_c](c[48]:ubyte + -2)
     label B_h:
-    c[78]:byte = 5;
-    c[79]:long@1 =
-      (((i = c[1]:long) << 56L | (i & 65280L) << 40L) |
-       ((i & 16711680L) << 24L | (i & 4278190080L) << 8L)) |
-      (((i >> 8L & 4278190080L) | (i >> 24L & 16711680L)) |
-       ((i >> 40L & 65280L) | i >> 56L));
-    f_am(e, c + 78, 9);
+    c[76]:byte = 5;
+    c[77]:long@1 =
+      (((j = c[1]:long) << 56L | (j & 65280L) << 40L) |
+       ((j & 16711680L) << 24L | (j & 4278190080L) << 8L)) |
+      (((j >> 8L & 4278190080L) | (j >> 24L & 16711680L)) |
+       ((j >> 40L & 65280L) | j >> 56L));
+    f_am(e, c + 76, 9);
     continue L_c;
     label B_g:
-    c[87]:byte = 6;
-    c[96]:long@1 =
-      (((i = c[2]:long) << 56L | (i & 65280L) << 40L) |
-       ((i & 16711680L) << 24L | (i & 4278190080L) << 8L)) |
-      (((i >> 8L & 4278190080L) | (i >> 24L & 16711680L)) |
-       ((i >> 40L & 65280L) | i >> 56L));
-    c[88]:long@1 =
-      (((i = c[1]:long) << 56L | (i & 65280L) << 40L) |
-       ((i & 16711680L) << 24L | (i & 4278190080L) << 8L)) |
-      (((i >> 8L & 4278190080L) | (i >> 24L & 16711680L)) |
-       ((i >> 40L & 65280L) | i >> 56L));
-    f_am(e, c + 87, 17);
+    c[85]:byte = 6;
+    c[94]:long@1 =
+      (((j = c[2]:long) << 56L | (j & 65280L) << 40L) |
+       ((j & 16711680L) << 24L | (j & 4278190080L) << 8L)) |
+      (((j >> 8L & 4278190080L) | (j >> 24L & 16711680L)) |
+       ((j >> 40L & 65280L) | j >> 56L));
+    c[86]:long@1 =
+      (((j = c[1]:long) << 56L | (j & 65280L) << 40L) |
+       ((j & 16711680L) << 24L | (j & 4278190080L) << 8L)) |
+      (((j >> 8L & 4278190080L) | (j >> 24L & 16711680L)) |
+       ((j >> 40L & 65280L) | j >> 56L));
+    f_am(e, c + 85, 17);
     continue L_c;
     label B_f:
-    c[130]:byte = 9;
-    c[139]:long@1 =
-      ((i = i64_extend_i32_u(j = c[5]:int)) << 56L | (i & 65280L) << 40L) |
-      ((i & 16711680L) << 24L | (i & 4278190080L) << 8L);
-    c[131]:long@1 =
-      (((i = c[1]:long) << 56L | (i & 65280L) << 40L) |
-       ((i & 16711680L) << 24L | (i & 4278190080L) << 8L)) |
-      (((i >> 8L & 4278190080L) | (i >> 24L & 16711680L)) |
-       ((i >> 40L & 65280L) | i >> 56L));
-    k = c[4]:int;
-    f_am(e, c + 130, 17);
-    f_oq(h, i, k, j);
+    c[128]:byte = 9;
+    c[137]:long@1 =
+      ((j = i64_extend_i32_u(k = c[5]:int)) << 56L | (j & 65280L) << 40L) |
+      ((j & 16711680L) << 24L | (j & 4278190080L) << 8L);
+    c[129]:long@1 =
+      (((j = c[1]:long) << 56L | (j & 65280L) << 40L) |
+       ((j & 16711680L) << 24L | (j & 4278190080L) << 8L)) |
+      (((j >> 8L & 4278190080L) | (j >> 24L & 16711680L)) |
+       ((j >> 40L & 65280L) | j >> 56L));
+    l = c[4]:int;
+    f_am(e, c + 128, 17);
+    f_oq(h, j, l, k);
     continue L_c;
     label B_e:
-    c[147]:byte = 10;
-    c[156]:int@1 =
-      ((j = c[4]:int) << 24 | (j & 65280) << 8) |
-      ((j >> 8 & 65280) | j >> 24);
-    c[148]:long@1 =
-      (((i = c[1]:long) << 56L | (i & 65280L) << 40L) |
-       ((i & 16711680L) << 24L | (i & 4278190080L) << 8L)) |
-      (((i >> 8L & 4278190080L) | (i >> 24L & 16711680L)) |
-       ((i >> 40L & 65280L) | i >> 56L));
-    f_am(e, c + 147, 13);
+    c[145]:byte = 10;
+    c[158]:short@1 =
+      (k = select_if(k = c[6]:int, 1024, k < 1024)) << 8 | k >> 8;
+    c[154]:int@1 =
+      ((l = c[4]:int) << 24 | (l & 65280) << 8) |
+      ((l >> 8 & 65280) | l >> 24);
+    c[146]:long@1 =
+      (((j = c[1]:long) << 56L | (j & 65280L) << 40L) |
+       ((j & 16711680L) << 24L | (j & 4278190080L) << 8L)) |
+      (((j >> 8L & 4278190080L) | (j >> 24L & 16711680L)) |
+       ((j >> 40L & 65280L) | j >> 56L));
+    if (eqz(k)) goto B_i;
+    memory_copy(i, c[5]:int, k);
+    label B_i:
+    f_am(e, c + 145, k + 15);
     continue L_c;
     label B_d:
-    k = c[24]:ubyte;
-    i = c[1]:long;
-    j = c[5]:int;
-    if (eqz(j)) goto B_i;
-    c[104]:byte = 7;
-    c[113]:long@1 =
-      ((l = i64_extend_i32_u(j)) << 56L | (l & 65280L) << 40L) |
-      ((l & 16711680L) << 24L | (l & 4278190080L) << 8L);
-    c[105]:long@1 =
-      ((i << 56L | (i & 65280L) << 40L) |
-       ((i & 16711680L) << 24L | (i & 4278190080L) << 8L)) |
-      (((i >> 8L & 4278190080L) | (i >> 24L & 16711680L)) |
-       ((i >> 40L & 65280L) | i >> 56L));
-    var m:int = c[4]:int;
-    f_am(e, c + 104, 17);
-    f_oq(g, i, m, j);
-    label B_i:
-    if (eqz(k & 1)) continue L_c;
-    c[121]:byte = 8;
-    c[122]:long@1 =
-      ((i << 56L | (i & 65280L) << 40L) |
-       ((i & 16711680L) << 24L | (i & 4278190080L) << 8L)) |
-      (((i >> 8L & 4278190080L) | (i >> 24L & 16711680L)) |
-       ((i >> 40L & 65280L) | i >> 56L));
-    f_am(e, c + 121, 9);
+    l = c[24]:ubyte;
+    j = c[1]:long;
+    k = c[5]:int;
+    if (eqz(k)) goto B_j;
+    c[102]:byte = 7;
+    c[111]:long@1 =
+      ((m = i64_extend_i32_u(k)) << 56L | (m & 65280L) << 40L) |
+      ((m & 16711680L) << 24L | (m & 4278190080L) << 8L);
+    c[103]:long@1 =
+      ((j << 56L | (j & 65280L) << 40L) |
+       ((j & 16711680L) << 24L | (j & 4278190080L) << 8L)) |
+      (((j >> 8L & 4278190080L) | (j >> 24L & 16711680L)) |
+       ((j >> 40L & 65280L) | j >> 56L));
+    var n:int = c[4]:int;
+    f_am(e, c + 102, 17);
+    f_oq(g, j, n, k);
+    label B_j:
+    if (eqz(l & 1)) continue L_c;
+    c[119]:byte = 8;
+    c[120]:long@1 =
+      ((j << 56L | (j & 65280L) << 40L) |
+       ((j & 16711680L) << 24L | (j & 4278190080L) << 8L)) |
+      (((j >> 8L & 4278190080L) | (j >> 24L & 16711680L)) |
+       ((j >> 40L & 65280L) | j >> 56L));
+    f_am(e, c + 119, 9);
     continue L_c;
   }
   label B_b:
-  if (eqz(e[172358]:ushort)) goto B_a;
-  if (b < (f = (j = e + e[172356]:ushort * 1026)[155940])) goto B_a;
-  if (eqz(f)) goto B_j;
-  memory_copy(a, j + 311880 + 2, f);
-  label B_j:
-  e[172358]:short = e[172358]:ushort + -1;
-  e[172356]:short = e[172356]:ushort + 1 & 31;
+  if (eqz(e[172614]:ushort)) goto B_a;
+  if (b < (f = (k = e + e[172612]:ushort * 1042)[155940])) goto B_a;
+  if (eqz(f)) goto B_k;
+  memory_copy(a, k + 311880 + 2, f);
+  label B_k:
+  e[172614]:short = e[172614]:ushort + -1;
+  e[172612]:short = e[172612]:ushort + 1 & 31;
   d = f;
   label B_a:
-  g_a = c + 160;
+  g_a = c + 1184;
   return d;
 }
 
