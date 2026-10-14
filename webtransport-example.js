@@ -21,8 +21,7 @@
  *
  *   1. WT client sends "hello" on a bidi stream
  *   2. Chrome encodes it as QUIC packets, arrives at UDPSocket
- *   3. feedPacket() copies Uint8Array into WASM memorFailed to establish a connection to https://127.0.0.1:4433/: net::ERR_QUIC_PROTOCOL_ERROR.QUIC_NETWORK_IDLE_TIMEOUT (No recent network activity after 4001042us. Timeout:4s num_undecryptable_packets: 0 {}).
-wt-client.js:1 Uncaught WebTransportError: Opening handshake failed.y → qz_recv_packet()
+ *   3. feedPacket() copies Uint8Array into WASM memory → qz_recv_packet()
  *   4. qz_poll_event() returns EVT_WT_SESSION (CONNECT request)
  *   5. qz_wt_accept_session() sends HTTP/3 200
  *   6. qz_poll_event() returns EVT_WT_BIDI_STREAM (new bidi stream)
