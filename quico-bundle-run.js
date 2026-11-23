@@ -1,0 +1,830 @@
+// quico-bundle-run.js
+// guest271314 11-23-2026
+// node quico-bundle-run.js
+// deno -A --unstable-net quico-bundle-run.js
+// bun -b quico-bundle-run.js
+// tjs run quico-bundle-run.js
+const ua = globalThis.navigator?.userAgent ?? "";
+const isDeno = ua.startsWith("Deno");
+const isTjs = ua.startsWith("txiki.js");
+const isBun = ua.startsWith("Bun");
+
+if (isDeno) {
+  for (const k of ["Buffer", "process", "global"]) {
+    try {
+      Object.defineProperty(globalThis, k, {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      });
+    } catch {}
+  }
+  globalThis.process = {
+    env: {},
+    version: "v20.0.0",
+    nextTick: (fn, ...a) => queueMicrotask(() => fn(...a)),
+  };
+}
+
+const pktType = (d) =>
+  !(d[0] & 0x80)
+    ? "1RTT"
+    : ["Initial", "0RTT", "Handshake", "Retry"][(d[0] >> 4) & 3];
+
+// 1. Universal WICG Direct Sockets UDPSocket Polyfill
+if (typeof globalThis.UDPSocket === "undefined") {
+  class UDPSocket {
+    #socket = null;
+    #mode;
+    #remoteAddress;
+    #remotePort;
+    #openedResolve;
+    #openedReject;
+    #closedResolve;
+    #closedReject;
+    #closePromise = null;
+
+    constructor(options = {}) {
+      this.opened = new Promise((resolve, reject) => {
+        this.#openedResolve = resolve;
+        this.#openedReject = reject;
+      });
+
+      this.closed = new Promise((resolve, reject) => {
+        this.#closedResolve = resolve;
+        this.#closedReject = reject;
+      });
+
+      this.#init(options).catch((err) => {
+        this.#openedReject(err);
+        this.closed.catch(() => {});
+        this.#closedReject(err);
+      });
+    }
+
+    async #init(options) {
+      const {
+        remoteAddress,
+        remotePort,
+        localAddress,
+        localPort,
+        sendBufferSize,
+        receiveBufferSize,
+        dnsQueryType,
+        ipv6Only = false,
+        multicastTimeToLive,
+        multicastLoopback,
+        multicastAllowAddressSharing = false,
+      } = options;
+
+      const hasRemote = remoteAddress !== undefined || remotePort !== undefined;
+      const hasLocal = localAddress !== undefined || localPort !== undefined;
+
+      if ((hasRemote && hasLocal) || (!hasRemote && !hasLocal)) {
+        throw new DOMException(
+          "Specify either (remoteAddress + remotePort) or (localAddress).",
+          "InvalidAccessError",
+        );
+      }
+
+      if (hasRemote && (!remoteAddress || remotePort === undefined)) {
+        throw new DOMException(
+          "Both remoteAddress and remotePort are required for connected mode.",
+          "InvalidAccessError",
+        );
+      }
+
+      if (hasLocal && !localAddress) {
+        throw new DOMException(
+          "localAddress is required for bound mode.",
+          "InvalidAccessError",
+        );
+      }
+
+      this.#mode = hasRemote ? "connected" : "bound";
+
+      // --- A. Deno ---
+      if (isDeno) {
+        if (this.#mode === "connected") {
+          this.#remoteAddress = remoteAddress;
+          this.#remotePort = remotePort;
+          this.#socket = globalThis.Deno.listenDatagram({
+            port: 4433,
+            transport: "udp",
+            hostname: "0.0.0.0",
+          });
+        } else {
+          const opts = {
+            port: localPort || 4433,
+            transport: "udp",
+            hostname: localAddress,
+          };
+          if (multicastAllowAddressSharing) opts.reuseAddress = true;
+          this.#socket = globalThis.Deno.listenDatagram(opts);
+        }
+
+        const addr = this.#socket.addr;
+        const openInfo = {
+          readable: this.#createDenoReadableStream(),
+          writable: this.#createDenoWritableStream(),
+          localAddress: addr.hostname,
+          localPort: addr.port,
+        };
+
+        if (this.#mode === "connected") {
+          openInfo.remoteAddress = this.#remoteAddress;
+          openInfo.remotePort = this.#remotePort;
+        }
+
+        this.#openedResolve(openInfo);
+        return;
+      }
+
+      // --- B. txiki.js ---
+      if (isTjs) {
+        if (this.#mode === "connected") {
+          this.#remoteAddress = remoteAddress;
+          this.#remotePort = remotePort;
+          this.#socket = await globalThis.tjs.listen(
+            "udp",
+            remoteAddress.includes(":") ? "::" : "0.0.0.0",
+            0,
+          );
+        } else {
+          this.#socket = await globalThis.tjs.listen(
+            "udp",
+            localAddress,
+            localPort || 0,
+            {
+              reuseAddr: Boolean(multicastAllowAddressSharing),
+              ipv6Only: Boolean(ipv6Only),
+            },
+          );
+        }
+
+        const addr = this.#socket.localAddress;
+        const openInfo = {
+          readable: this.#createTjsReadableStream(),
+          writable: this.#createTjsWritableStream(),
+          localAddress: addr.ip,
+          localPort: addr.port,
+        };
+
+        if (this.#mode === "connected") {
+          openInfo.remoteAddress = this.#remoteAddress;
+          openInfo.remotePort = this.#remotePort;
+        }
+
+        this.#openedResolve(openInfo);
+        return;
+      }
+
+      // --- C. Node.js / Bun ---
+      const dgram = await import("node:dgram");
+      const dns = await import("node:dns/promises");
+      const net = await import("node:net");
+
+      let targetIp = remoteAddress;
+      let family = 4;
+
+      if (this.#mode === "connected") {
+        const ipVersion = net.isIP(remoteAddress);
+        if (ipVersion) {
+          family = ipVersion;
+        } else {
+          const lookupOpts = dnsQueryType === "ipv6"
+            ? { family: 6 }
+            : dnsQueryType === "ipv4"
+            ? { family: 4 }
+            : {};
+          const resolved = await dns.lookup(remoteAddress, lookupOpts);
+          targetIp = resolved.address;
+          family = resolved.family;
+        }
+        this.#remoteAddress = targetIp;
+        this.#remotePort = remotePort;
+      } else {
+        const ipVersion = net.isIP(localAddress);
+        if (!ipVersion) {
+          throw new DOMException(
+            "localAddress must be a valid IP address.",
+            "InvalidAccessError",
+          );
+        }
+        family = ipVersion;
+      }
+
+      const socketType = family === 6 ? "udp6" : "udp4";
+      this.#socket = dgram.createSocket({
+        type: socketType,
+        reuseAddr: Boolean(multicastAllowAddressSharing),
+        ipv6Only: Boolean(ipv6Only),
+      });
+
+      this.#socket.on("error", (err) => {
+        if (!this.#closePromise) {
+          this.#closePromise = Promise.resolve();
+          this.#closedReject(new DOMException(err.message, "NetworkError"));
+        }
+      });
+
+      await new Promise((resolve, reject) => {
+        const onError = (err) =>
+          reject(new DOMException(err.message, "NetworkError"));
+        this.#socket.once("error", onError);
+
+        if (this.#mode === "bound") {
+          this.#socket.bind(localPort || 0, localAddress, () => {
+            this.#socket.off("error", onError);
+            resolve();
+          });
+        } else {
+          this.#socket.connect(this.#remotePort, this.#remoteAddress, () => {
+            this.#socket.off("error", onError);
+            resolve();
+          });
+        }
+      });
+
+      try {
+        if (sendBufferSize) this.#socket.setSendBufferSize(sendBufferSize);
+        if (receiveBufferSize) {
+          this.#socket.setRecvBufferSize(receiveBufferSize);
+        }
+        if (multicastTimeToLive !== undefined) {
+          this.#socket.setMulticastTTL(multicastTimeToLive);
+        }
+        if (multicastLoopback !== undefined) {
+          this.#socket.setMulticastLoopback(Boolean(multicastLoopback));
+        }
+      } catch {}
+
+      const localInfo = this.#socket.address();
+      const openInfo = {
+        readable: this.#createNodeReadableStream(),
+        writable: this.#createNodeWritableStream(),
+        localAddress: localInfo.address,
+        localPort: localInfo.port,
+      };
+
+      if (this.#mode === "connected") {
+        openInfo.remoteAddress = this.#remoteAddress;
+        openInfo.remotePort = this.#remotePort;
+      }
+
+      this.#openedResolve(openInfo);
+    }
+    #createDenoReadableStream() {
+      const { errors } = globalThis.Deno;
+      const buf = new Uint8Array(65536);
+
+      const isClosing = (err) =>
+        this.#closePromise ||
+        err instanceof errors.BadResource ||
+        err instanceof errors.Interrupted;
+
+      const isTransient = (err) =>
+        err instanceof errors.ConnectionReset ||
+        err instanceof errors.ConnectionRefused ||
+        err instanceof errors.ConnectionAborted;
+
+      return new ReadableStream({
+        pull: async (controller) => {
+          while (true) {
+            try {
+              const [raw, addr] = await this.#socket.receive(buf);
+              // console.log("rx", raw.byteLength, addr.hostname, addr.port);
+              if (
+                this.#mode === "connected" &&
+                (addr.hostname !== this.#remoteAddress ||
+                  addr.port !== this.#remotePort)
+              ) {
+                continue; // ignore packets from other peers
+              }
+
+              const data = raw.slice(); // copy out of the reusable buffer
+              console.log("rx", pktType(data), data.byteLength);
+              controller.enqueue(
+                this.#mode === "bound"
+                  ? {
+                    data,
+                    remoteAddress: addr.hostname,
+                    remotePort: addr.port,
+                  }
+                  : { data },
+              );
+              return;
+            } catch (err) {
+              if (isClosing(err)) {
+                try {
+                  controller.close();
+                } catch {}
+                return;
+              }
+              if (isTransient(err)) continue;
+              controller.error(new DOMException(err.message, "NetworkError"));
+              return;
+            }
+          }
+        },
+        cancel: () => this.close(),
+      });
+    }
+
+    #createDenoWritableStream() {
+      const { errors } = globalThis.Deno;
+      return new WritableStream({
+        write: async (chunk) => {
+          if (!chunk || !chunk.data) {
+            throw new TypeError(
+              "UDPMessage must contain a 'data' BufferSource.",
+            );
+          }
+          const view = ArrayBuffer.isView(chunk.data)
+            ? new Uint8Array(
+              chunk.data.buffer,
+              chunk.data.byteOffset,
+              chunk.data.byteLength,
+            )
+            : new Uint8Array(chunk.data);
+
+          const hostname = this.#mode === "connected"
+            ? this.#remoteAddress
+            : chunk.remoteAddress;
+          const port = this.#mode === "connected"
+            ? this.#remotePort
+            : chunk.remotePort;
+          console.log("tx", pktType(view), view.byteLength);
+          try {
+            await this.#socket.send(view, { transport: "udp", hostname, port });
+          } catch (err) {
+            if (
+              this.#closePromise ||
+              err instanceof errors.BadResource ||
+              err instanceof errors.Interrupted
+            ) return;
+            // UDP is lossy and QUIC retransmits, so one failed send must not
+            // permanently error the writable.
+            console.error("UDP send failed:", err.message);
+          }
+        },
+        close: () => this.close(),
+        abort: () => this.close(),
+      });
+    }
+
+    #createTjsReadableStream() {
+      return new ReadableStream({
+        pull: async (controller) => {
+          try {
+            const buf = new Uint8Array(65536);
+            const { nread, addr } = await this.#socket.recv(buf);
+            if (nread === null) {
+              controller.close();
+              return;
+            }
+            const data = buf.slice(0, nread);
+            const packet = this.#mode === "bound"
+              ? { data, remoteAddress: addr.ip, remotePort: addr.port }
+              : { data };
+            controller.enqueue(packet);
+          } catch (err) {
+            if (this.#closePromise) {
+              try {
+                controller.close();
+              } catch {}
+            } else {
+              controller.error(new DOMException(err.message, "NetworkError"));
+            }
+          }
+        },
+        cancel: () => this.close(),
+      });
+    }
+
+    #createTjsWritableStream() {
+      return new WritableStream({
+        write: async (chunk) => {
+          if (!chunk || !chunk.data) {
+            throw new TypeError(
+              "UDPMessage must contain a 'data' BufferSource.",
+            );
+          }
+          const view = ArrayBuffer.isView(chunk.data)
+            ? new Uint8Array(
+              chunk.data.buffer,
+              chunk.data.byteOffset,
+              chunk.data.byteLength,
+            )
+            : new Uint8Array(chunk.data);
+
+          const ip = this.#mode === "connected"
+            ? this.#remoteAddress
+            : chunk.remoteAddress;
+          const port = this.#mode === "connected"
+            ? this.#remotePort
+            : chunk.remotePort;
+
+          await this.#socket.send(view, { ip, port });
+        },
+        close: () => this.close(),
+        abort: () => this.close(),
+      });
+    }
+    #createNodeReadableStream() {
+      return new ReadableStream({
+        start: (controller) => {
+          this.#socket.on("message", (msg, rinfo) => {
+            const data = new Uint8Array(
+              msg.buffer,
+              msg.byteOffset,
+              msg.byteLength,
+            );
+            const packet = this.#mode === "bound"
+              ? { data, remoteAddress: rinfo.address, remotePort: rinfo.port }
+              : { data };
+            controller.enqueue(packet);
+          });
+          this.#socket.on("close", () => {
+            try {
+              controller.close();
+            } catch {}
+          });
+        },
+        cancel: () => this.close(),
+      });
+    }
+
+    #createNodeWritableStream() {
+      return new WritableStream({
+        write: async (chunk) => {
+          if (!chunk || !chunk.data) {
+            throw new TypeError(
+              "UDPMessage must contain a 'data' BufferSource.",
+            );
+          }
+          const view = ArrayBuffer.isView(chunk.data)
+            ? new Uint8Array(
+              chunk.data.buffer,
+              chunk.data.byteOffset,
+              chunk.data.byteLength,
+            )
+            : new Uint8Array(chunk.data);
+
+          if (this.#mode === "connected") {
+            if (chunk.remoteAddress || chunk.remotePort) {
+              throw new DOMException(
+                "remoteAddress/remotePort cannot be set on connected UDPSocket.",
+                "InvalidAccessError",
+              );
+            }
+            await new Promise((resolve, reject) => {
+              this.#socket.send(view, (err) => (err ? reject(err) : resolve()));
+            });
+          } else {
+            if (!chunk.remoteAddress || chunk.remotePort === undefined) {
+              throw new DOMException(
+                "remoteAddress and remotePort are required in bound mode.",
+                "InvalidAccessError",
+              );
+            }
+            await new Promise((resolve, reject) => {
+              this.#socket.send(
+                view,
+                chunk.remotePort,
+                chunk.remoteAddress,
+                (err) => (err ? reject(err) : resolve()),
+              );
+            });
+          }
+        },
+        close: () => this.close(),
+        abort: () => this.close(),
+      });
+    }
+
+    close() {
+      if (this.#closePromise) return this.#closePromise;
+
+      this.#closePromise = new Promise((resolve) => {
+        if (!this.#socket) {
+          this.#closedResolve();
+          return resolve();
+        }
+        try {
+          if (isDeno || isTjs) {
+            this.#socket.close();
+            this.#closedResolve();
+            resolve();
+          } else {
+            this.#socket.close(() => {
+              this.#closedResolve();
+              resolve();
+            });
+          }
+        } catch {
+          this.#closedResolve();
+          resolve();
+        }
+      });
+
+      return this.#closePromise;
+    }
+  }
+
+  globalThis.UDPSocket = UDPSocket;
+}
+
+// 2. Browser-bundle globals shim
+//if (!isDeno && !isTjs && !isBun) {
+  globalThis.Buffer = globalThis?.Buffer
+//}
+
+globalThis.process = globalThis.process || {
+  env: {},
+  version: "v20.0.0",
+  nextTick: (fn, ...args) => queueMicrotask(() => fn(...args)),
+};
+/*
+if (typeof globalThis.setImmediate !== "function") {
+  let nextId = 1;
+  const tasks = new Map();
+  const channel = new MessageChannel();
+
+  channel.port1.onmessage = ({ data: id }) => {
+    const task = tasks.get(id);
+    if (!task) return;
+    tasks.delete(id);
+    task.fn(...task.args);
+  };
+
+  globalThis.setImmediate = (fn, ...args) => {
+    const id = nextId++;
+    tasks.set(id, { fn, args });
+    channel.port2.postMessage(id);
+    return id;
+  };
+
+  globalThis.clearImmediate = (id) => {
+    tasks.delete(id);
+  };
+}
+*/
+if (isDeno) {
+  const t = await import("node:timers");
+  globalThis.setImmediate = t.setImmediate;
+  globalThis.clearImmediate = t.clearImmediate;
+} else if (typeof globalThis.setImmediate !== "function") {
+  let nextId = 1;
+  const tasks = new Map();
+  const channel = new MessageChannel();
+
+  channel.port1.onmessage = ({ data: id }) => {
+    const task = tasks.get(id);
+    if (!task) return;
+    tasks.delete(id);
+    task.fn(...task.args);
+  };
+
+  globalThis.setImmediate = (fn, ...args) => {
+    const id = nextId++;
+    tasks.set(id, { fn, args });
+    channel.port2.postMessage(id);
+    return id;
+  };
+
+  globalThis.clearImmediate = (id) => {
+    tasks.delete(id);
+  };
+}
+
+// 3. Resolve base URL for assets (no import.meta, so it parses in DevTools/snippets)
+// Override with: globalThis.__ASSET_BASE__ = "https://host/dir/"  (trailing slash)
+async function resolveBase() {
+  if (globalThis.__ASSET_BASE__) {
+    return new URL(
+      globalThis.__ASSET_BASE__,
+      globalThis.location?.href ?? "file:///",
+    ).href;
+  }
+  // Browser / DevTools: the page the snippet runs on
+  if (globalThis.document?.baseURI) return globalThis.document.baseURI;
+  if (isDeno) return globalThis.Deno.mainModule;
+  if (isTjs) {
+    const cwd = typeof globalThis.tjs.cwd === "function"
+      ? globalThis.tjs.cwd()
+      : globalThis.tjs.cwd;
+    return `file://${cwd}/`;
+  }
+  // Node / Bun
+  const { pathToFileURL } = await import("node:url");
+  return pathToFileURL(globalThis.process.argv[1]).href;
+}
+
+const BASE = await resolveBase();
+const isBrowser = typeof globalThis.document !== "undefined";
+
+const { createH3Server } = await import(
+  new URL("./quico-bundle-min.js", BASE).href
+);
+
+async function loadAsset(relativePath, asText = true) {
+  const url = new URL(relativePath, BASE);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+    return asText ? await res.text() : new Uint8Array(await res.arrayBuffer());
+  } catch (err) {
+    if (isBrowser) throw err; // no filesystem fallback in a browser
+    if (isTjs) {
+      const bytes = await globalThis.tjs.readFile(url.pathname);
+      return asText ? new TextDecoder().decode(bytes) : bytes;
+    }
+    const fs = await import("node:fs/promises");
+    return asText
+      ? await fs.readFile(url, "utf8")
+      : new Uint8Array(await fs.readFile(url));
+  }
+}
+
+const key = await loadAsset("./key.pem", true);
+const cert = await loadAsset("./cert.pem", true);
+const certDer = await loadAsset("./cert.der", false);
+
+const certHash = await crypto.subtle.digest("SHA-256", certDer.buffer);
+const CERT_DIGEST = new Uint8Array(certHash);
+
+// 4. WebTransport over WICG Direct Sockets server
+async function startDirectSocketsWebTransport({
+  keyPem,
+  certPem,
+  localAddress = "0.0.0.0",
+  localPort = 4433,
+}) {
+  const udp = new UDPSocket({ localAddress, localPort });
+  udp.closed.then(console.log).catch(console.error).then(() =>
+    console.log("UDPSocket closed")
+  );
+
+  const { readable, writable, localAddress: boundAddr, localPort: boundPort } =
+    await udp.opened;
+  const writer = writable.getWriter();
+  const reader = readable.getReader();
+
+  const externalSocket = {
+    address() {
+      return {
+        address: boundAddr,
+        port: boundPort,
+        family: boundAddr.includes(":") ? "IPv6" : "IPv4",
+      };
+    },
+    send(msg, offset, length, port, address, cb) {
+      if (
+        typeof offset === "number" &&
+        typeof length === "number" &&
+        typeof port === "number"
+      ) {
+        msg = msg.subarray(offset, offset + length);
+      } else {
+        cb = address;
+        address = length;
+        port = offset;
+      }
+
+      // Copy: Quico may reuse its buffer before the queued write actually runs.
+      const data = new Uint8Array(msg.byteLength);
+      data.set(new Uint8Array(msg.buffer, msg.byteOffset, msg.byteLength));
+
+      writer
+        .write({ data, remoteAddress: address, remotePort: port })
+        .then(() => cb?.(null))
+        .catch((err) => {
+          console.error("UDPSocket write failed:", err);
+          cb?.(err);
+        });
+    },
+    close(cb) {
+      Promise.allSettled([reader.cancel(), writer.close(), udp.close()]).then(
+        () => cb?.(),
+      );
+    },
+  };
+
+  const server = createH3Server(
+    {
+      key: keyPem,
+      cert: certPem,
+      socket: externalSocket,
+    },
+    (req, res) => {
+      if (req.headers[":protocol"] !== "webtransport") {
+        res.writeHead(404);
+        res.end("WebTransport only");
+        return;
+      }
+
+      if (req.webTransportProtocols?.length) {
+        res.setWebTransportProtocol(req.webTransportProtocols);
+      }
+
+      res.writeHead(200);
+      console.log("WebTransport session connected:", req.url);
+
+      req.on("close", () => {
+        console.log("WebTransport session closed:", req.url);
+        console.log("closeInfo", req.closeInfo);
+      });
+
+      req.on("stream", (stream) => {
+        stream.on("data", (chunk) => stream.write(chunk));
+        stream.on("end", () => stream.end());
+      });
+
+      req.on("unidirectionalStream", (readableStream) => {
+        const writableStream = res.createUnidirectionalStream();
+        readableStream.pipe(writableStream);
+      });
+
+      req.on("datagram", (data) => {
+        res.sendDatagram(data);
+      });
+    },
+  );
+
+  (async () => {
+    while (true) {
+      let r;
+      try {
+        r = await reader.read();
+      } catch (err) {
+        console.error("UDPSocket read error:", err);
+        break;
+      }
+      if (r.done) break;
+      try {
+        server.handlePacket(r.value.data, {
+          address: r.value.remoteAddress,
+          port: r.value.remotePort,
+          family: r.value.remoteAddress.includes(":") ? "IPv6" : "IPv4",
+          size: r.value.data.byteLength,
+        });
+      } catch (err) {
+        console.error("handlePacket failed:", err);
+      }
+    }
+  })();
+
+  console.log(
+    "Cert SHA-256:",
+    [...CERT_DIGEST].map((b) => b.toString(16).padStart(2, "0")).join(""),
+  );
+  console.log(`WebTransport server bound on ${boundAddr}:${boundPort}`);
+  console.log("Waiting for WebTransport client connection...");
+  console.log("Connect with:");
+  console.log([
+    '  var wt = new WebTransport("https://127.0.0.1:4433", {',
+    "    serverCertificateHashes: [{",
+    '      algorithm: "sha-256",',
+    `      value: new Uint8Array([${[...CERT_DIGEST].join(",")}]),`,
+    "    }],",
+    "  });",
+    "  await wt.ready;",
+    "  var data = new Uint8Array(20 * 1024 ** 2);",
+    "  var len = 0;",
+    "  wt.closed.then(console.log).catch(console.error);",
+    "  var wt_stream = await wt.createBidirectionalStream().catch(console.log);",
+    "  var wt_writer = wt_stream.writable.getWriter();",
+    "  await wt_writer.ready;",
+    "  wt_stream.readable.pipeTo(new WritableStream({",
+    "    write(value) {",
+    "      console.log(len += value.length);",
+    "      if (len === data.length) {",
+    '        console.log("Echo roundtrip complete");',
+    "        len = 0;",
+    "      }",
+    "    },",
+    '    close() { console.log("readable close"); },',
+    "    abort(reason) { console.log(reason); }",
+    "  })).catch(console.log);",
+    "  await wt_writer.write(data);",
+    "  // await wt_writer.close();",
+    '  // wt.close({ closeCode: 4999, reason: "Done streaming." });',
+  ].join("\n"));
+
+  return server;
+}
+
+if (!globalThis.__WT_SERVER_STARTED__) {
+  globalThis.__WT_SERVER_STARTED__ = true;
+  startDirectSocketsWebTransport({ keyPem: key, certPem: cert }).catch(
+    console.error,
+  );
+}
+
+globalThis.addEventListener?.("unhandledrejection", (e) => {
+  console.error("unhandledrejection:", e.reason);
+});
+globalThis.addEventListener?.("error", (e) => {
+  console.error("uncaught:", e.error ?? e.message);
+});
