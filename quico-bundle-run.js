@@ -435,7 +435,7 @@ async function resolveBase() {
 const BASE = await resolveBase();
 
 const { createH3Server } = await import(
-  new URL("./quico-bundle.js", BASE).href
+  new URL("./quico-bundle-min.js", BASE).href
 );
 
 async function loadAsset(relativePath, asText = true) {
@@ -606,11 +606,14 @@ async function startDirectSocketsWebTransport({
     "  var wt_writer = wt_stream.writable.getWriter();",
     "  await wt_writer.ready;",
     "  wt_stream.readable.pipeTo(new WritableStream({",
-    "    write(value) {",
+    "    async write(value) {",
     "      console.log(len += value.length);",
     "      if (len === data.length) {",
     '        console.log("Echo roundtrip complete");',
     "        len = 0;",
+    "        await wt_writer.close();",
+    '        wt.close({ closeCode: 4999, reason: "Done streaming." });',
+    "        process.exit(0);",
     "      }",
     "    },",
     '    close() { console.log("readable close"); },',
