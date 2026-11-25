@@ -1,10 +1,11 @@
-// quico-bundle-run.js
-// guest271314 11-24-2026
-// node quico-bundle-run.js
-// deno -A --unstable-unsafe-proto quico-bundle-run.js
-// bun -b quico-bundle-run.js
-// tjs run quico-bundle-run.js
-// QUICO_DEBUG=1 <runtime> quico-bundle-run.js
+//! quico-bundle-run.js
+//! guest271314 11-24-2026
+//! node quico-bundle-run.js
+//! deno -A quico-bundle-run.js
+//! bun -b quico-bundle-run.js
+//! tjs run quico-bundle-run.js
+//! chrome <devtools> quico-bundle-run.js
+//! QUICO_DEBUG=1 <runtime> quico-bundle-run.js
 
 const ua = globalThis.navigator?.userAgent ?? "";
 const isDeno = ua.startsWith("Deno");
@@ -605,14 +606,11 @@ async function startDirectSocketsWebTransport({
     "  var wt_writer = wt_stream.writable.getWriter();",
     "  await wt_writer.ready;",
     "  wt_stream.readable.pipeTo(new WritableStream({",
-    "    async write(value) {",
+    "    write(value) {",
     "      console.log(len += value.length);",
     "      if (len === data.length) {",
     '        console.log("Echo roundtrip complete");',
     "        len = 0;",
-    "        await wt_writer.close();",
-    '        wt.close({ closeCode: 4999, reason: "Done streaming." });',
-    "         process.exit(0);",
     "      }",
     "    },",
     '    close() { console.log("readable close"); },',

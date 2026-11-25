@@ -1,9 +1,3 @@
-// quico-bundle.js
-// guest271314 11-23-2026
-// export { createServer as createH3Server } from "./node_modules/quico/src/h3_server.js";
-// bun build --target=browser --format=esm --outfile=quico-bundle.js export.js
-// node -e 'f=require("fs");m=f.readFileSync("quico-bundle.js","utf8");r=m.replace("Buffer2 = (init_buffer(), __toCommonJS(exports_buffer)).Buffer;",(x)=>"globalThis.Buffer = "+x);f.writeFileSync("quico-bundle-browser2.js",r);'
-// bun build --target=browser --format=esm --outfile=quico-bundle-min.js quico-bundle.js
 var __create = Object.create;
 var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
@@ -7128,7 +7122,7 @@ var init_crypto = __esm(() => {
         if (typeof window < "u" && typeof window.Buffer < "u")
           Buffer2 = window.Buffer;
         else
-          globalThis.Buffer = Buffer2 = (init_buffer(), __toCommonJS(exports_buffer)).Buffer;
+          Buffer2 = (init_buffer(), __toCommonJS(exports_buffer)).Buffer;
       } catch (e) {}
       BN.isBN = function(num) {
         if (num instanceof BN)
@@ -77902,6 +77896,14 @@ function createServer2(options, handler) {
     setTokenSecret: qserver.setTokenSecret
   };
 }
+
+// export.js
+//! quico-bundle.js
+//! guest271314 11-23-2026
+//! export { createServer as createH3Server } from "./node_modules/quico/src/h3_server.js";
+//! bun build --target=browser --format=esm --outfile=quico-bundle.js export.js
+//! node -e 'const fs=require("fs");fs.writeFileSync("quico-bundle.js",fs.readFileSync("quico-bundle.js","utf8").replaceAll("this.__proto__._events","Object.getPrototypeOf(this)?._events"))'
+//! bun build --target=browser --format=esm --minify --outfile=quico-bundle-min.js quico-bundle.js
 export {
   createServer2 as createH3Server
 };
