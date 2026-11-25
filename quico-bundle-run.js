@@ -1,37 +1,19 @@
 // quico-bundle-run.js
-// guest271314 11-23-2026
+// guest271314 11-24-2026
 // node quico-bundle-run.js
-// deno -A --unstable-net quico-bundle-run.js
+// deno -A --unstable-unsafe-proto quico-bundle-run.js
 // bun -b quico-bundle-run.js
 // tjs run quico-bundle-run.js
+// QUICO_DEBUG=1 <runtime> quico-bundle-run.js
+
 const ua = globalThis.navigator?.userAgent ?? "";
 const isDeno = ua.startsWith("Deno");
 const isTjs = ua.startsWith("txiki.js");
 const isBun = ua.startsWith("Bun");
-
-if (isDeno) {
-  for (const k of ["Buffer", "process", "global"]) {
-    try {
-      Object.defineProperty(globalThis, k, {
-        value: undefined,
-        configurable: true,
-        writable: true,
-      });
-    } catch {}
-  }
-  globalThis.process = {
-    env: {},
-    version: "v20.0.0",
-    nextTick: (fn, ...a) => queueMicrotask(() => fn(...a)),
-  };
-}
-
-const pktType = (d) =>
-  !(d[0] & 0x80)
-    ? "1RTT"
-    : ["Initial", "0RTT", "Handshake", "Retry"][(d[0] >> 4) & 3];
+const isBrowser = typeof globalThis.document !== "undefined";
 
 // 1. Universal WICG Direct Sockets UDPSocket Polyfill
+// Native globalThis.UDPSocket is used automatically when present (Chrome Direct Sockets).
 if (typeof globalThis.UDPSocket === "undefined") {
   class UDPSocket {
     #socket = null;
@@ -72,8 +54,6 @@ if (typeof globalThis.UDPSocket === "undefined") {
         receiveBufferSize,
         dnsQueryType,
         ipv6Only = false,
-        multicastTimeToLive,
-        multicastLoopback,
         multicastAllowAddressSharing = false,
       } = options;
 
@@ -103,44 +83,7 @@ if (typeof globalThis.UDPSocket === "undefined") {
 
       this.#mode = hasRemote ? "connected" : "bound";
 
-      // --- A. Deno ---
-      if (isDeno) {
-        if (this.#mode === "connected") {
-          this.#remoteAddress = remoteAddress;
-          this.#remotePort = remotePort;
-          this.#socket = globalThis.Deno.listenDatagram({
-            port: 4433,
-            transport: "udp",
-            hostname: "0.0.0.0",
-          });
-        } else {
-          const opts = {
-            port: localPort || 4433,
-            transport: "udp",
-            hostname: localAddress,
-          };
-          if (multicastAllowAddressSharing) opts.reuseAddress = true;
-          this.#socket = globalThis.Deno.listenDatagram(opts);
-        }
-
-        const addr = this.#socket.addr;
-        const openInfo = {
-          readable: this.#createDenoReadableStream(),
-          writable: this.#createDenoWritableStream(),
-          localAddress: addr.hostname,
-          localPort: addr.port,
-        };
-
-        if (this.#mode === "connected") {
-          openInfo.remoteAddress = this.#remoteAddress;
-          openInfo.remotePort = this.#remotePort;
-        }
-
-        this.#openedResolve(openInfo);
-        return;
-      }
-
-      // --- B. txiki.js ---
+      // --- A. txiki.js (tjs.listen) ---
       if (isTjs) {
         if (this.#mode === "connected") {
           this.#remoteAddress = remoteAddress;
@@ -179,7 +122,7 @@ if (typeof globalThis.UDPSocket === "undefined") {
         return;
       }
 
-      // --- C. Node.js / Bun ---
+      // --- B. Node.js / Deno / Bun (node:dgram) ---
       const dgram = await import("node:dgram");
       const dns = await import("node:dns/promises");
       const net = await import("node:net");
@@ -215,11 +158,7 @@ if (typeof globalThis.UDPSocket === "undefined") {
       }
 
       const socketType = family === 6 ? "udp6" : "udp4";
-      this.#socket = dgram.createSocket({
-        type: socketType,
-        reuseAddr: Boolean(multicastAllowAddressSharing),
-        ipv6Only: Boolean(ipv6Only),
-      });
+      this.#socket = dgram.createSocket({ type: socketType });
 
       this.#socket.on("error", (err) => {
         if (!this.#closePromise) {
@@ -251,12 +190,6 @@ if (typeof globalThis.UDPSocket === "undefined") {
         if (receiveBufferSize) {
           this.#socket.setRecvBufferSize(receiveBufferSize);
         }
-        if (multicastTimeToLive !== undefined) {
-          this.#socket.setMulticastTTL(multicastTimeToLive);
-        }
-        if (multicastLoopback !== undefined) {
-          this.#socket.setMulticastLoopback(Boolean(multicastLoopback));
-        }
       } catch {}
 
       const localInfo = this.#socket.address();
@@ -274,105 +207,6 @@ if (typeof globalThis.UDPSocket === "undefined") {
 
       this.#openedResolve(openInfo);
     }
-    #createDenoReadableStream() {
-      const { errors } = globalThis.Deno;
-      const buf = new Uint8Array(65536);
-
-      const isClosing = (err) =>
-        this.#closePromise ||
-        err instanceof errors.BadResource ||
-        err instanceof errors.Interrupted;
-
-      const isTransient = (err) =>
-        err instanceof errors.ConnectionReset ||
-        err instanceof errors.ConnectionRefused ||
-        err instanceof errors.ConnectionAborted;
-
-      return new ReadableStream({
-        pull: async (controller) => {
-          while (true) {
-            try {
-              const [raw, addr] = await this.#socket.receive(buf);
-              // console.log("rx", raw.byteLength, addr.hostname, addr.port);
-              if (
-                this.#mode === "connected" &&
-                (addr.hostname !== this.#remoteAddress ||
-                  addr.port !== this.#remotePort)
-              ) {
-                continue; // ignore packets from other peers
-              }
-
-              const data = raw.slice(); // copy out of the reusable buffer
-              console.log("rx", pktType(data), data.byteLength);
-              controller.enqueue(
-                this.#mode === "bound"
-                  ? {
-                    data,
-                    remoteAddress: addr.hostname,
-                    remotePort: addr.port,
-                  }
-                  : { data },
-              );
-              return;
-            } catch (err) {
-              if (isClosing(err)) {
-                try {
-                  controller.close();
-                } catch {}
-                return;
-              }
-              if (isTransient(err)) continue;
-              controller.error(new DOMException(err.message, "NetworkError"));
-              return;
-            }
-          }
-        },
-        cancel: () => this.close(),
-      });
-    }
-
-    #createDenoWritableStream() {
-      const { errors } = globalThis.Deno;
-      return new WritableStream({
-        write: async (chunk) => {
-          if (!chunk || !chunk.data) {
-            throw new TypeError(
-              "UDPMessage must contain a 'data' BufferSource.",
-            );
-          }
-          const view = ArrayBuffer.isView(chunk.data)
-            ? new Uint8Array(
-              chunk.data.buffer,
-              chunk.data.byteOffset,
-              chunk.data.byteLength,
-            )
-            : new Uint8Array(chunk.data);
-
-          const hostname = this.#mode === "connected"
-            ? this.#remoteAddress
-            : chunk.remoteAddress;
-          const port = this.#mode === "connected"
-            ? this.#remotePort
-            : chunk.remotePort;
-          console.log("tx", pktType(view), view.byteLength);
-          try {
-            await this.#socket.send(view, { transport: "udp", hostname, port });
-          } catch (err) {
-            if (
-              this.#closePromise ||
-              err instanceof errors.BadResource ||
-              err instanceof errors.Interrupted
-            ) return;
-            // UDP is lossy and QUIC retransmits, so one failed send must not
-            // permanently error the writable.
-            console.error("UDP send failed:", err.message);
-          }
-        },
-        close: () => this.close(),
-        abort: () => this.close(),
-      });
-    }
-
     #createTjsReadableStream() {
       return new ReadableStream({
         pull: async (controller) => {
@@ -431,15 +265,14 @@ if (typeof globalThis.UDPSocket === "undefined") {
         abort: () => this.close(),
       });
     }
+
     #createNodeReadableStream() {
       return new ReadableStream({
         start: (controller) => {
           this.#socket.on("message", (msg, rinfo) => {
-            const data = new Uint8Array(
-              msg.buffer,
-              msg.byteOffset,
-              msg.byteLength,
-            );
+            const data = new Uint8Array(msg.byteLength);
+            data.set(new Uint8Array(msg.buffer, msg.byteOffset, msg.byteLength));
+
             const packet = this.#mode === "bound"
               ? { data, remoteAddress: rinfo.address, remotePort: rinfo.port }
               : { data };
@@ -471,6 +304,14 @@ if (typeof globalThis.UDPSocket === "undefined") {
             )
             : new Uint8Array(chunk.data);
 
+          const payload = typeof globalThis.Buffer !== "undefined"
+            ? globalThis.Buffer.from(
+              view.buffer,
+              view.byteOffset,
+              view.byteLength,
+            )
+            : view;
+
           if (this.#mode === "connected") {
             if (chunk.remoteAddress || chunk.remotePort) {
               throw new DOMException(
@@ -479,7 +320,10 @@ if (typeof globalThis.UDPSocket === "undefined") {
               );
             }
             await new Promise((resolve, reject) => {
-              this.#socket.send(view, (err) => (err ? reject(err) : resolve()));
+              this.#socket.send(
+                payload,
+                (err) => (err ? reject(err) : resolve()),
+              );
             });
           } else {
             if (!chunk.remoteAddress || chunk.remotePort === undefined) {
@@ -490,7 +334,7 @@ if (typeof globalThis.UDPSocket === "undefined") {
             }
             await new Promise((resolve, reject) => {
               this.#socket.send(
-                view,
+                payload,
                 chunk.remotePort,
                 chunk.remoteAddress,
                 (err) => (err ? reject(err) : resolve()),
@@ -512,7 +356,7 @@ if (typeof globalThis.UDPSocket === "undefined") {
           return resolve();
         }
         try {
-          if (isDeno || isTjs) {
+          if (isTjs) {
             this.#socket.close();
             this.#closedResolve();
             resolve();
@@ -536,16 +380,14 @@ if (typeof globalThis.UDPSocket === "undefined") {
 }
 
 // 2. Browser-bundle globals shim
-//if (!isDeno && !isTjs && !isBun) {
-  globalThis.Buffer = globalThis?.Buffer
-//}
+if (typeof globalThis.process === "undefined") {
+  globalThis.process = {
+    env: {},
+    version: "v20.0.0",
+    nextTick: (fn, ...args) => queueMicrotask(() => fn(...args)),
+  };
+}
 
-globalThis.process = globalThis.process || {
-  env: {},
-  version: "v20.0.0",
-  nextTick: (fn, ...args) => queueMicrotask(() => fn(...args)),
-};
-/*
 if (typeof globalThis.setImmediate !== "function") {
   let nextId = 1;
   const tasks = new Map();
@@ -569,37 +411,7 @@ if (typeof globalThis.setImmediate !== "function") {
     tasks.delete(id);
   };
 }
-*/
-if (isDeno) {
-  const t = await import("node:timers");
-  globalThis.setImmediate = t.setImmediate;
-  globalThis.clearImmediate = t.clearImmediate;
-} else if (typeof globalThis.setImmediate !== "function") {
-  let nextId = 1;
-  const tasks = new Map();
-  const channel = new MessageChannel();
-
-  channel.port1.onmessage = ({ data: id }) => {
-    const task = tasks.get(id);
-    if (!task) return;
-    tasks.delete(id);
-    task.fn(...task.args);
-  };
-
-  globalThis.setImmediate = (fn, ...args) => {
-    const id = nextId++;
-    tasks.set(id, { fn, args });
-    channel.port2.postMessage(id);
-    return id;
-  };
-
-  globalThis.clearImmediate = (id) => {
-    tasks.delete(id);
-  };
-}
-
-// 3. Resolve base URL for assets (no import.meta, so it parses in DevTools/snippets)
-// Override with: globalThis.__ASSET_BASE__ = "https://host/dir/"  (trailing slash)
+// 3. Resolve base URL for assets
 async function resolveBase() {
   if (globalThis.__ASSET_BASE__) {
     return new URL(
@@ -607,7 +419,6 @@ async function resolveBase() {
       globalThis.location?.href ?? "file:///",
     ).href;
   }
-  // Browser / DevTools: the page the snippet runs on
   if (globalThis.document?.baseURI) return globalThis.document.baseURI;
   if (isDeno) return globalThis.Deno.mainModule;
   if (isTjs) {
@@ -616,16 +427,14 @@ async function resolveBase() {
       : globalThis.tjs.cwd;
     return `file://${cwd}/`;
   }
-  // Node / Bun
   const { pathToFileURL } = await import("node:url");
   return pathToFileURL(globalThis.process.argv[1]).href;
 }
 
 const BASE = await resolveBase();
-const isBrowser = typeof globalThis.document !== "undefined";
 
 const { createH3Server } = await import(
-  new URL("./quico-bundle-min.js", BASE).href
+  new URL("./quico-bundle.js", BASE).href
 );
 
 async function loadAsset(relativePath, asText = true) {
@@ -635,7 +444,7 @@ async function loadAsset(relativePath, asText = true) {
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
     return asText ? await res.text() : new Uint8Array(await res.arrayBuffer());
   } catch (err) {
-    if (isBrowser) throw err; // no filesystem fallback in a browser
+    if (isBrowser) throw err;
     if (isTjs) {
       const bytes = await globalThis.tjs.readFile(url.pathname);
       return asText ? new TextDecoder().decode(bytes) : bytes;
@@ -651,7 +460,7 @@ const key = await loadAsset("./key.pem", true);
 const cert = await loadAsset("./cert.pem", true);
 const certDer = await loadAsset("./cert.der", false);
 
-const certHash = await crypto.subtle.digest("SHA-256", certDer.buffer);
+const certHash = await crypto.subtle.digest("SHA-256", certDer);
 const CERT_DIGEST = new Uint8Array(certHash);
 
 // 4. WebTransport over WICG Direct Sockets server
@@ -692,7 +501,6 @@ async function startDirectSocketsWebTransport({
         port = offset;
       }
 
-      // Copy: Quico may reuse its buffer before the queued write actually runs.
       const data = new Uint8Array(msg.byteLength);
       data.set(new Uint8Array(msg.buffer, msg.byteOffset, msg.byteLength));
 
@@ -797,11 +605,14 @@ async function startDirectSocketsWebTransport({
     "  var wt_writer = wt_stream.writable.getWriter();",
     "  await wt_writer.ready;",
     "  wt_stream.readable.pipeTo(new WritableStream({",
-    "    write(value) {",
+    "    async write(value) {",
     "      console.log(len += value.length);",
     "      if (len === data.length) {",
     '        console.log("Echo roundtrip complete");',
     "        len = 0;",
+    "        await wt_writer.close();",
+    '        wt.close({ closeCode: 4999, reason: "Done streaming." });',
+    "         process.exit(0);",
     "      }",
     "    },",
     '    close() { console.log("readable close"); },',
