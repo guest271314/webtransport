@@ -1559,7 +1559,7 @@ function addAbortListener(signal, listener) {
   } };
 }
 var SymbolFor, kCapture, kErrorMonitor, kMaxEventTargetListeners, kMaxEventTargetListenersWarned, kRejection, captureRejectionSymbol, ArrayPrototypeSlice, defaultMaxListeners = 10, EventEmitter = function(opts) {
-  if (this._events === undefined || this._events === this.__proto__._events)
+  if (this._events === undefined || this._events === Object.getPrototypeOf(this)._events)
     this._events = { __proto__: null }, this._eventsCount = 0;
   if (this._maxListeners ??= undefined, this[kCapture] = opts?.captureRejections ? Boolean(opts?.captureRejections) : EventEmitterPrototype[kCapture])
     this.emit = emitWithRejectionCapture;
@@ -19599,7 +19599,7 @@ var init_assert = __esm(() => {
     }
     function _setPrototypeOf(o, p) {
       return _setPrototypeOf = Object.setPrototypeOf ? Object.setPrototypeOf.bind() : function(o, p) {
-        return o.__proto__ = p, o;
+        return Object.setPrototypeOf(o,p), o;
       }, _setPrototypeOf(o, p);
     }
     function _createSuper(Derived) {
@@ -19641,7 +19641,7 @@ var init_assert = __esm(() => {
     }
     function _getPrototypeOf(o) {
       return _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf.bind() : function(o) {
-        return o.__proto__ || Object.getPrototypeOf(o);
+        return Object.getPrototypeOf(o) || Object.getPrototypeOf(o);
       }, _getPrototypeOf(o);
     }
     var codes = {}, assert, util;
@@ -19899,12 +19899,12 @@ var init_assert = __esm(() => {
     }
     function _setPrototypeOf(o, p) {
       return _setPrototypeOf = Object.setPrototypeOf ? Object.setPrototypeOf.bind() : function(o, p) {
-        return o.__proto__ = p, o;
+        return Object.setPrototypeOf(o,p), o;
       }, _setPrototypeOf(o, p);
     }
     function _getPrototypeOf(o) {
       return _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf.bind() : function(o) {
-        return o.__proto__ || Object.getPrototypeOf(o);
+        return Object.getPrototypeOf(o) || Object.getPrototypeOf(o);
       }, _getPrototypeOf(o);
     }
     function _typeof(o) {
@@ -22333,6 +22333,10 @@ __export(exports_record, {
   seqToBytes: () => seqToBytes,
   writeRecord: () => writeRecord
 });
+
+// buffer-shim.js
+init_buffer();
+globalThis.Buffer = globalThis.Buffer || Buffer2;
 
 // node_modules/quico/src/h3_server.js
 init_crypto();

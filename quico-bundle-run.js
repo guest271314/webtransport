@@ -272,7 +272,9 @@ if (typeof globalThis.UDPSocket === "undefined") {
         start: (controller) => {
           this.#socket.on("message", (msg, rinfo) => {
             const data = new Uint8Array(msg.byteLength);
-            data.set(new Uint8Array(msg.buffer, msg.byteOffset, msg.byteLength));
+            data.set(
+              new Uint8Array(msg.buffer, msg.byteOffset, msg.byteLength),
+            );
 
             const packet = this.#mode === "bound"
               ? { data, remoteAddress: rinfo.address, remotePort: rinfo.port }
@@ -457,11 +459,14 @@ async function loadAsset(relativePath, asText = true) {
   }
 }
 
-const key = await loadAsset("./key.pem", true);
-const cert = await loadAsset("./cert.pem", true);
-const certDer = await loadAsset("./cert.der", false);
+// const key = await loadAsset("./key.pem", true);
+// const cert = await loadAsset("./cert.pem", true);
+// const certDer = await loadAsset("./cert.der", false);
 
-const certHash = await crypto.subtle.digest("SHA-256", certDer);
+import certificates from "./cert.json" with { type: "json" };
+const { cert, key, certHash } = certificates;
+
+// const certHash = await crypto.subtle.digest("SHA-256", certDer);
 const CERT_DIGEST = new Uint8Array(certHash);
 
 // 4. WebTransport over WICG Direct Sockets server
@@ -540,6 +545,25 @@ async function startDirectSocketsWebTransport({
       res.writeHead(200);
       console.log("WebTransport session connected:", req.url);
 
+      // 1. Server-initiated bidirectional stream (Node Duplex)
+      const bidi = res.createBidirectionalStream();
+      bidi.write("hello from server");
+      bidi.on("data", (chunk) => {
+        console.log("Client replied on server stream:", chunk.toString());
+      });
+      bidi.end();
+
+      // 2. Server-initiated unidirectional stream (Node Writable)
+      const uni = res.createUnidirectionalStream(
+        { waitUntilAvailable: true, sendOrder: 5 },
+        (err) => {
+          if (err) return; // Session closed before client granted stream credit
+          console.log("Unidirectional stream is open");
+        },
+      );
+      uni.write("one-way push payload");
+      uni.end();
+
       req.on("close", () => {
         console.log("WebTransport session closed:", req.url);
         console.log("closeInfo", req.closeInfo);
@@ -591,39 +615,78 @@ async function startDirectSocketsWebTransport({
   console.log(`WebTransport server bound on ${boundAddr}:${boundPort}`);
   console.log("Waiting for WebTransport client connection...");
   console.log("Connect with:");
-  console.log([
-    '  var wt = new WebTransport("https://127.0.0.1:4433", {',
-    "    serverCertificateHashes: [{",
-    '      algorithm: "sha-256",',
-    `      value: new Uint8Array([${[...CERT_DIGEST].join(",")}]),`,
-    "    }],",
-    "  });",
-    "  await wt.ready;",
-    "  var data = new Uint8Array(20 * 1024 ** 2);",
-    "  var len = 0;",
-    "  wt.closed.then(console.log).catch(console.error);",
-    "  var wt_stream = await wt.createBidirectionalStream().catch(console.log);",
-    "  var wt_writer = wt_stream.writable.getWriter();",
-    "  await wt_writer.ready;",
-    "  wt_stream.readable.pipeTo(new WritableStream({",
-    "    async write(value) {",
-    "      console.log(len += value.length);",
-    "      if (len === data.length) {",
-    '        console.log("Echo roundtrip complete");',
-    "        len = 0;",
-    "        await wt_writer.close();",
-    '        wt.close({ closeCode: 4999, reason: "Done streaming." });',
-    "        process.exit(0);",
-    "      }",
-    "    },",
-    '    close() { console.log("readable close"); },',
-    "    abort(reason) { console.log(reason); }",
-    "  })).catch(console.log);",
-    "  await wt_writer.write(data);",
-    "  // await wt_writer.close();",
-    '  // wt.close({ closeCode: 4999, reason: "Done streaming." });',
-  ].join("\n"));
+  const clientCode = `
+var wt = new WebTransport("https://127.0.0.1:4433", {
+  serverCertificateHashes: [{
+    algorithm: "sha-256",
+    value: new Uint8Array([${[...CERT_DIGEST].join(",")}]),
+  }],
+});
+await wt.ready.catch((e) => console.log(e));
 
+// Handle incoming server-initiated bidirectional streams
+(async () => {
+  const reader = wt.incomingBidirectionalStreams.getReader();
+  while (true) {
+    const { value: stream, done } = await reader.read();
+    if (done) break;
+
+    // stream has WHATWG { readable, writable }
+    const textReader = stream.readable.pipeThrough(new TextDecoderStream())
+      .getReader();
+    const { value } = await textReader.read();
+    console.log("Received:", value);
+
+    const writer = stream.writable.getWriter();
+    await writer.write(new TextEncoder().encode("ack from client"));
+    await writer.close();
+  }
+})();
+
+// Handle incoming server-initiated unidirectional streams
+(async () => {
+  const reader = wt.incomingUnidirectionalStreams.getReader();
+  // console.log(reader);
+  while (true) {
+    const { value: readable, done } = await reader.read();
+    if (done) break;
+
+    for await (const chunk of readable) {
+      console.log("Push chunk:", new TextDecoder().decode(chunk));
+    }
+  }
+})();
+var data = new Uint8Array(1024);
+var len = 0;
+wt.closed.then(console.log).catch(console.error);
+var wt_stream = await wt.createBidirectionalStream().catch(console.log);
+var wt_writer = wt_stream.writable.getWriter();
+await wt_writer.ready;
+wt_stream.readable.pipeTo(
+  new WritableStream({
+    async write(value) {
+      console.log(len += value.length);
+      if (len === data.length) {
+        console.log("Echo roundtrip complete");
+        len = 0;
+        await wt_writer.close();
+        wt.close({ closeCode: 4999, reason: "Done streaming." });
+        await new Promise((r) => setTimeout(r, 1000));
+        process.exit(0);
+      }
+    },
+    close() {
+      console.log("readable close");
+    },
+    abort(reason) {
+      console.log(reason);
+    },
+  }),
+  { highWaterMark: Infinity },
+).catch(console.log);
+await wt_writer.write(data);
+  `;
+  console.log(clientCode);
   return server;
 }
 
