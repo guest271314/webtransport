@@ -462,9 +462,7 @@ async function loadAsset(relativePath, asText = true) {
 // const key = await loadAsset("./key.pem", true);
 // const cert = await loadAsset("./cert.pem", true);
 // const certDer = await loadAsset("./cert.der", false);
-
-import certificates from "./cert.json" with { type: "json" };
-const { cert, key, certHash } = certificates;
+const { cert, key, certHash } = (await import("./cert.json", {with: { type: "json" }})).default;
 
 // const certHash = await crypto.subtle.digest("SHA-256", certDer);
 const CERT_DIGEST = new Uint8Array(certHash);
@@ -682,7 +680,6 @@ wt_stream.readable.pipeTo(
       console.log(reason);
     },
   }),
-  { highWaterMark: Infinity },
 ).catch(console.log);
 await wt_writer.write(data);
   `;
